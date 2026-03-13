@@ -1,0 +1,744 @@
+Quiero que redesarrolles una aplicación web para cálculo y diagramación de armado de bandas modulares.
+
+Tu objetivo es reconstruir esta aplicación de forma profesional, mantenible y escalable, manteniendo la lógica de negocio ya validada y mejorando la estructura del código.
+
+## Meta principal
+Construir una aplicación web en React + TypeScript, lista para ejecutarse localmente, que permita:
+- calcular el armado de una banda modular
+- determinar combinaciones válidas de módulos por fila
+- evitar alineación vertical de juntas entre filas adyacentes
+- manejar módulos normales y módulos con empujadores
+- mostrar un diagrama visual del armado
+- exportar BOM, juntas y plan completo
+- incluir pruebas unitarias de la lógica principal
+
+## Stack preferido
+- React
+- TypeScript
+- Vite
+- Tailwind CSS
+- Vitest para tests
+
+Si propones una variante equivalente, debe seguir siendo ligera, moderna y fácil de mantener.
+
+## Reglas de negocio obligatorias
+1. El ancho se ingresa en pulgadas, pero debe convertirse a links según el incremento por link.
+2. El largo se ingresa en pulgadas y debe convertirse a número de filas usando el pitch.
+3. Debe permitir redondeo del ancho a links con modos:
+   - round
+   - floor
+   - ceil
+4. Cada fila debe componerse por:
+   - orilla izquierda
+   - módulos internos
+   - orilla derecha
+5. Las orillas siempre deben quedar en los extremos.
+6. Deben generarse todas las combinaciones posibles de módulos internos que sumen exactamente el ancho requerido restante.
+7. Debe permitirse una fila compuesta solo por dos orillas únicamente cuando la suma de ambas orillas sea exactamente igual al ancho total.
+8. Debe priorizarse la solución con menor cantidad de piezas.
+9. En empate, deben favorecerse piezas más grandes.
+10. Deben calcularse las juntas internas de cada fila.
+11. Debe evitarse la alineación vertical de juntas entre filas adyacentes.
+12. Si no existe patrón sin coincidencias, debe elegirse el patrón con menor solape.
+13. Deben generarse variantes tipo patrón ladrillo mediante rotación de módulos internos para aumentar la diversidad de patrones.
+14. Debe soportar filas con empujadores / flights / friction top.
+15. Los empujadores deben poder configurarse:
+   - por paso en filas
+   - por distancia en pulgadas
+   - con offset
+16. Las filas con empujador deben usar inventario de módulos de empujador, conservando la geometría del patrón.
+17. Debe generarse BOM por tipo de módulo.
+18. Debe mostrarse el listado de juntas por fila.
+19. Debe mostrarse un diagrama visual del armado.
+20. Debe permitir exportar:
+   - BOM en CSV
+   - plan en JSON
+   - juntas por fila en CSV
+
+## Requerimientos de UI
+La aplicación debe tener una interfaz web clara y utilitaria, pensada para ingeniería y fabricación.
+
+Pantallas o secciones mínimas:
+1. Panel de parámetros:
+   - pitch
+   - incremento por link
+   - ancho
+   - largo
+   - redondeo
+   - escala visual en px por link
+2. Selectores de módulos disponibles:
+   - orillas normales
+   - internos normales
+   - orillas empujador
+   - internos empujador
+3. Configuración de empujadores:
+   - activar/desactivar
+   - modo por filas o por distancia
+   - paso
+   - offset
+4. Panel de resumen:
+   - ancho en links
+   - ancho real resultante
+   - filas
+   - cantidad de patrones generados
+   - sets de juntas únicos
+   - filas con empujador
+5. Tabla BOM
+6. Listado de juntas por fila
+7. Diagrama visual SVG o equivalente
+8. Acciones:
+   - Calcular
+   - Exportar BOM
+   - Exportar JSON
+   - Exportar juntas
+
+## Requerimientos técnicos
+1. No concentres toda la lógica en un solo componente.
+2. Separa claramente:
+   - domain logic
+   - tipos
+   - utilidades
+   - hooks
+   - componentes
+   - exportadores
+   - tests
+3. Mantén la lógica de negocio fuera de la vista tanto como sea posible.
+4. El proyecto debe quedar listo para ejecutar con:
+   - npm install
+   - npm run dev
+   - npm run test
+5. Incluye README claro.
+6. Incluye tests unitarios para la lógica central.
+
+## Estructura sugerida
+Puedes usar esta estructura o una mejor equivalente:
+
+src/
+  components/
+  features/
+    belt-planner/
+      domain/
+      utils/
+      hooks/
+      services/
+      types/
+      exporters/
+  pages/
+  tests/
+
+## Forma de trabajo que quiero
+1. Primero analiza el problema.
+2. Propón la arquitectura antes de implementar.
+3. Identifica riesgos o ambigüedades.
+4. Documenta los supuestos que tengas que tomar.
+5. Implementa por fases.
+6. Prioriza exactitud lógica sobre apariencia visual.
+7. Después mejora UX sin romper la lógica.
+
+## Importante
+Quiero que uses como referencia funcional una versión previa de la app que ya existe, pero NO quiero que la dejes como un componente monolítico. Quiero rediseño estructural, no solo copia.
+
+Cuando termines, entrega:
+1. estructura de carpetas
+2. código fuente completo
+3. README
+4. tests
+5. explicación breve de decisiones de diseño
+6. mejoras futuras sugeridas
+
+A continuación te pego el código base actual que debes usar como referencia funcional:
+
+
+import React, { useMemo, useState } from "react";
+
+// --- Utilidades ---
+function roundLinks(widthIn, incIn, mode) {
+  const x = widthIn / incIn;
+  if (mode === "floor") return Math.floor(x);
+  if (mode === "ceil") return Math.ceil(x);
+  return Math.round(x);
+}
+
+function combosSumTarget(target, partSizes, limit = 1200) {
+  const sizes = [...new Set(partSizes)].sort((a, b) => b - a);
+  const memo = new Map();
+  function key(rem, idx) { return rem + ":" + idx; }
+  function rec(rem, idx) {
+    const k = key(rem, idx);
+    if (memo.has(k)) return memo.get(k);
+    if (rem === 0) return [[]];
+    if (rem < 0 || idx >= sizes.length) return [];
+    const s = sizes[idx];
+    const maxK = Math.floor(rem / s);
+    const out = [];
+    for (let kcount = maxK; kcount >= 0; kcount--) {
+      const part = Array(kcount).fill(s);
+      const tails = rec(rem - s * kcount, idx + 1);
+      for (const t of tails) {
+        out.push([...part, ...t]);
+        if (out.length >= limit) break;
+      }
+      if (out.length >= limit) break;
+    }
+    memo.set(k, out);
+    return out;
+  }
+  const res = rec(target, 0);
+  res.sort((a, b) => {
+    // menos piezas; y favorecer piezas grandes
+    if (a.length !== b.length) return a.length - b.length;
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const ai = a[i] ?? 0, bi = b[i] ?? 0;
+      if (ai !== bi) return bi - ai;
+    }
+    return 0;
+  });
+  return res.slice(0, limit);
+}
+
+function seamPositionsFromSegments(segments) {
+  const seams = new Set();
+  let acc = 0;
+  for (let i = 0; i < segments.length; i++) {
+    acc += segments[i].size;
+    if (i !== segments.length - 1) seams.add(acc); // no añadir borde final
+  }
+  return seams;
+}
+
+function makeRowPatterns(widthLinks, edgeSizes, internalSizes, maxPatterns = 500) {
+  const patterns = [];
+  const eSizes = [...new Set(edgeSizes)].sort((a, b) => b - a);
+  const iSizes = [...new Set(internalSizes)].sort((a, b) => b - a);
+
+  for (const le of eSizes) {
+    for (const re of eSizes) {
+      if (le + re > widthLinks) continue;
+      const remain = widthLinks - le - re;
+      if (remain === 0) {
+        const segs = [
+          { role: "L", size: le, key: `edgeL_${le}` },
+          { role: "R", size: re, key: `edgeR_${re}` },
+        ];
+        const seams = Array.from(seamPositionsFromSegments(segs));
+        const pieceCount = 2;
+        const score2 = -(le * le + re * re);
+        patterns.push({ segments: segs, seams, pieceCount, score: [pieceCount, score2], widthLinks });
+        continue;
+      }
+      const combos = combosSumTarget(remain, iSizes, 1200);
+      for (const combo of combos) {
+        const base = combo.slice();
+        const segs = [
+          { role: "L", size: le, key: `edgeL_${le}` },
+          ...base.map((w, idx) => ({ role: "I", size: w, key: `int_${w}_${idx}` })),
+          { role: "R", size: re, key: `edgeR_${re}` },
+        ];
+        const seams = Array.from(seamPositionsFromSegments(segs));
+        const pieceCount = 2 + base.length;
+        const score2 = -[...base, le, re].reduce((s, x) => s + x * x, 0);
+        patterns.push({ segments: segs, seams, pieceCount, score: [pieceCount, score2], widthLinks });
+
+        // Variantes por rotación de internos (patrón ladrillo)
+        for (let shift = 1; shift < Math.min(4, base.length); shift++) {
+          const rotated = base.slice(shift).concat(base.slice(0, shift));
+          const segs2 = [
+            { role: "L", size: le, key: `edgeL_${le}` },
+            ...rotated.map((w, idx) => ({ role: "I", size: w, key: `int_${w}_rot${shift}_${idx}` })),
+            { role: "R", size: re, key: `edgeR_${re}` },
+          ];
+          const seams2 = Array.from(seamPositionsFromSegments(segs2));
+          const pieceCount2 = 2 + rotated.length;
+          const score22 = -[...rotated, le, re].reduce((s, x) => s + x * x, 0);
+          patterns.push({ segments: segs2, seams: seams2, pieceCount: pieceCount2, score: [pieceCount2, score22], widthLinks });
+        }
+      }
+    }
+  }
+
+  // Deduplicar por conjunto de juntas + número de piezas
+  const dedup = new Map();
+  for (const p of patterns) {
+    const k = JSON.stringify({ s: [...p.seams].sort((a,b)=>a-b), c: p.pieceCount });
+    if (!dedup.has(k) || (p.score[0] < dedup.get(k).score[0]) || (p.score[0] === dedup.get(k).score[0] && p.score[1] < dedup.get(k).score[1])) {
+      dedup.set(k, p);
+    }
+  }
+  const uniq = Array.from(dedup.values());
+  uniq.sort((a, b) => (a.pieceCount - b.pieceCount) || (a.score[1] - b.score[1]));
+  return uniq.slice(0, maxPatterns);
+}
+
+function layoutRows(numRows, patterns) {
+  if (!patterns.length) return [];
+  const chosen = [];
+  let prevSeams = new Set();
+  for (let i = 0; i < numRows; i++) {
+    let picked = null;
+    for (const p of patterns) {
+      const inter = p.seams.filter((x) => prevSeams.has(x));
+      if (inter.length === 0) { picked = p; break; }
+    }
+    if (!picked) {
+      // elegir el de menor intersección
+      let best = null, bestOverlap = 1e9;
+      for (const p of patterns) {
+        const overlap = p.seams.filter((x) => prevSeams.has(x)).length;
+        if (overlap < bestOverlap) { bestOverlap = overlap; best = p; }
+      }
+      picked = best || patterns[0];
+    }
+    chosen.push(picked);
+    prevSeams = new Set(picked.seams);
+  }
+  return chosen;
+}
+
+function computeBOM(rows) {
+  const bom = {};
+  for (const r of rows) {
+    for (const seg of r.segments) {
+      const k = `${seg.role}:${seg.size}`;
+      bom[k] = (bom[k] || 0) + 1;
+    }
+  }
+  return bom;
+}
+
+function calcPusherRows(numRows, usePushers, mode, stepRows, offsetRows, stepIn, offsetIn, pitch){
+  const P = new Set();
+  if (!usePushers) return P;
+  let start = 1, step = 1;
+  if (mode === 'rows'){
+    step = Math.max(1, Math.round(stepRows || 1));
+    start = 1 + Math.max(0, Math.round(offsetRows || 0));
+  } else {
+    step = Math.max(1, Math.round(((stepIn || pitch)) / pitch));
+    start = 1 + Math.max(0, Math.round(((offsetIn || 0)) / pitch));
+  }
+  for (let r = start; r <= numRows; r += step) P.add(r);
+  return P;
+}
+
+function layoutRowsWithFlights(numRows, patternsNormal, patternsFlight, pusherRows){
+  if (!patternsNormal.length && !patternsFlight.length) return [];
+  const chosen = [];
+  let prevSeams = new Set();
+  for (let i = 1; i <= numRows; i++){
+    const useFlight = pusherRows.has(i);
+    const cand = (useFlight && patternsFlight.length) ? patternsFlight : patternsNormal;
+    let picked = null;
+    for (const p of cand){
+      const overlap = p.seams.reduce((acc, s) => acc + (prevSeams.has(s) ? 1 : 0), 0);
+      if (overlap === 0){ picked = p; break; }
+    }
+    if (!picked){
+      let best = null, bestOverlap = 1e9;
+      for (const p of cand){
+        const ov = p.seams.reduce((acc, s) => acc + (prevSeams.has(s) ? 1 : 0), 0);
+        if (ov < bestOverlap){ bestOverlap = ov; best = p; }
+      }
+      picked = best || (cand[0] || patternsNormal[0]);
+    }
+    let segments = picked.segments;
+    if (useFlight){
+      segments = picked.segments.map(seg => {
+        if (seg.role === 'L') return {...seg, role:'LF'};
+        if (seg.role === 'R') return {...seg, role:'RF'};
+        return {...seg, role:'IF'};
+      });
+    }
+    const row = { ...picked, segments };
+    chosen.push(row);
+    prevSeams = new Set(row.seams);
+  }
+  return chosen;
+}
+
+// --- TagSelect (selector tipo "tags" con desplegable y opciones que desaparecen si ya están elegidas) ---
+function TagSelect({ label, options, selected, onChange, format }) {
+  const [open, setOpen] = useState(false);
+  const available = options.filter(v => !selected.has(v));
+  function add(val){ const n = new Set(selected); n.add(val); onChange(n); }
+  function remove(val){ const n = new Set(selected); n.delete(val); onChange(n); }
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 mb-2">
+        {Array.from(selected).sort((a,b)=>b-a).map(val => (
+          <span key={val} className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 border rounded-full text-xs">
+            {format(val)}
+            <button type="button" onClick={()=>remove(val)} className="ml-1 text-gray-500 hover:text-black">×</button>
+          </span>
+        ))}
+        {selected.size === 0 && <span className="text-xs text-gray-400">— vacío —</span>}
+      </div>
+      <div className="relative">
+        <button type="button" className="px-2 py-1 border rounded-lg text-sm" onClick={()=>setOpen(o=>!o)}>
+          {label} ▾
+        </button>
+        {open && (
+          <div className="absolute z-10 mt-1 w-64 max-h-48 overflow-auto bg-white border rounded shadow">
+            {available.length === 0 ? (
+              <div className="p-2 text-xs text-gray-400">Sin opciones</div>
+            ) : (
+              available.map(val => (
+                <button key={val} type="button" onClick={()=>add(val)} className="w-full text-left px-2 py-1 hover:bg-gray-50 text-sm">
+                  {format(val)}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function BeltCalcCanvas() {
+  // Serie por defecto (editable)
+  const [pitch, setPitch] = useState(1.0); // in
+  const [inc, setInc] = useState(0.5); // in por link
+
+  // Parámetros
+  const [widthIn, setWidthIn] = useState(24);
+  const [lengthIn, setLengthIn] = useState(60);
+  const [rounding, setRounding] = useState("round");
+  const [pxPerLink, setPxPerLink] = useState(12);
+  // Control de cálculo: solo recalcular cuando se presione "Calcular"
+  const [calcTick, setCalcTick] = useState(0);
+
+  // Empujadores (Flights/Friction Top)
+  const [usePushers, setUsePushers] = useState(false);
+  const [pusherMode, setPusherMode] = useState('rows'); // 'rows' | 'distance'
+  const [pusherStepRows, setPusherStepRows] = useState(10);
+  const [pusherOffsetRows, setPusherOffsetRows] = useState(0);
+  const [pusherStepIn, setPusherStepIn] = useState(10);
+  const [pusherOffsetIn, setPusherOffsetIn] = useState(0);
+
+  // Sets de módulos disponibles (en links) — por defecto VACÍOS
+  const allSizes = Array.from({ length: 19 }, (_, i) => i + 2); // 2L..20L
+  const [edgeSel, setEdgeSel] = useState(new Set());
+  const [intSel, setIntSel] = useState(new Set());
+  const [edgeFlightSel, setEdgeFlightSel] = useState(new Set());
+  const [intFlightSel, setIntFlightSel] = useState(new Set());
+
+  const widthLinks = useMemo(() => roundLinks(widthIn, inc, rounding), [calcTick]);
+  const numRows = useMemo(() => Math.max(1, Math.round(lengthIn / pitch)), [calcTick]);
+
+  const patternsNormal = useMemo(() => {
+    const edges = Array.from(edgeSel.values()).sort((a,b)=>b-a);
+    const ints = Array.from(intSel.values()).sort((a,b)=>b-a);
+    return makeRowPatterns(widthLinks, edges, ints, 500);
+  }, [calcTick]);
+
+  const patternsFlight = useMemo(() => {
+    const edges = Array.from(edgeFlightSel.values()).sort((a,b)=>b-a);
+    const ints = Array.from(intFlightSel.values()).sort((a,b)=>b-a);
+    return makeRowPatterns(widthLinks, edges, ints, 500);
+  }, [calcTick]);
+
+  const pusherRows = useMemo(() => calcPusherRows(numRows, usePushers, pusherMode, pusherStepRows, pusherOffsetRows, pusherStepIn, pusherOffsetIn, pitch), [calcTick]);
+
+  const rows = useMemo(() => layoutRowsWithFlights(numRows, patternsNormal, patternsFlight, pusherRows), [calcTick]);
+  const bom = useMemo(() => computeBOM(rows), [rows]);
+  const uniqueSeamSets = useMemo(() => new Set(rows.map(r => JSON.stringify([...r.seams].sort((a,b)=>a-b)))).size, [rows]);
+  const widthRealIn = useMemo(() => widthLinks * inc, [widthLinks, inc]);
+
+  const [testReport, setTestReport] = useState(null);
+
+  function segFill(role, size) {
+    if (role === "L") return "#b3d9ff";     // orilla izq normal
+    if (role === "R") return "#ffd9b3";     // orilla der normal
+    if (role === "LF") return "#66b3ff";   // orilla izq empujador
+    if (role === "RF") return "#ffb366";   // orilla der empujador
+    if (role === "IF") return "#cdeccd";   // interno empujador
+    const shade = Math.min(230, 50 + size * 8); // internos normales
+    return `rgb(${shade},${shade},${shade})`;
+  }
+
+  const svgWidth = widthLinks * pxPerLink;
+  const rowH = 26, rowGap = 6;
+  const svgHeight = numRows * (rowH + rowGap) + rowGap;
+
+  function download(filename, content, type) {
+    const blob = new Blob([content], { type });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function exportBOM() {
+    const lines = ["Modulo(role:size_links),Cantidad"]; 
+    for (const [k,v] of Object.entries(bom)) lines.push(`${k},${v}`);
+    download("BOM.csv", lines.join("\n"), "text/csv");
+  }
+  function exportPlanJSON() {
+    const payload = {
+      widthIn, lengthIn, pitch, inc, rounding, widthLinks, widthRealIn, numRows,
+      bom, rows,
+      sizes: {
+        edges: Array.from(edgeSel).sort((a,b)=>b-a),
+        internals: Array.from(intSel).sort((a,b)=>b-a),
+        edgeFlights: Array.from(edgeFlightSel).sort((a,b)=>b-a),
+        internalFlights: Array.from(intFlightSel).sort((a,b)=>b-a),
+      },
+      pushers: {
+        enabled: usePushers,
+        mode: pusherMode,
+        stepRows: pusherStepRows,
+        offsetRows: pusherOffsetRows,
+        stepIn: pusherStepIn,
+        offsetIn: pusherOffsetIn,
+        rows: Array.from(pusherRows).sort((a,b)=>a-b),
+      }
+    };
+    download("plan.json", JSON.stringify(payload, null, 2), "application/json");
+  }
+  function exportSeamsCSV() {
+    const lines = ["Fila,Juntas (links)"];
+    rows.forEach((r, i) => lines.push(`${i+1},${[...r.seams].sort((a,b)=>a-b).join(" ")}`));
+    download("SEAMS.csv", lines.join("\n"), "text/csv");
+  }
+
+  function runSelfTests(){
+    const results = [];
+    try {
+      // T1: combos suman target y devuelven pocas piezas
+      const c1 = combosSumTarget(10, [6,4,3,2]);
+      const okSum = c1.every(lst => lst.reduce((s,x)=>s+x,0) === 10);
+      const minLen = Math.min(...c1.map(lst=>lst.length));
+      results.push({name:'T1 combos', pass: okSum && minLen === c1[0].length, detail:`combos=${c1.length}, minLen=${minLen}`});
+
+      // T2: juntas desde segmentos
+      const seams = seamPositionsFromSegments([{size:2},{size:4},{size:2}]);
+      const t2 = JSON.stringify(Array.from(seams).sort((a,b)=>a-b)) === JSON.stringify([2,6]);
+      results.push({name:'T2 seams', pass: t2, detail:`seams=${Array.from(seams).join(' ')}`});
+
+      // T3: anti-alineación básica
+      const pats = makeRowPatterns(20, [12,8,6,4,2], [12,8,6,4,2]);
+      const lay = layoutRows(6, pats);
+      const uniq = new Set(lay.map(r=>JSON.stringify([...r.seams].sort((a,b)=>a-b)))).size;
+      results.push({name:'T3 layout anti-align', pass: uniq >= 2, detail:`uniqueSets=${uniq}`});
+
+      // T4: empujadores asignan roles LF/RF/IF
+      const patsN = makeRowPatterns(20, [12,8,6,4,2], [12,8,6,4,2]);
+      const patsF = makeRowPatterns(20, [12,8,6,4,2], [12,8,6,4,2]);
+      const P = calcPusherRows(4, true, 'rows', 2, 0, 10, 0, 1);
+      const layF = layoutRowsWithFlights(4, patsN, patsF, P);
+      const hasFlightRow = layF.some((r,idx)=>P.has(idx+1) && r.segments.some(s=>['LF','RF','IF'].includes(s.role)));
+      results.push({name:'T4 empujadores roles', pass: hasFlightRow, detail:`rowsFlight=${Array.from(P).join(',')}`});
+
+      // T5: segFill genera rgb correcto para interno normal
+      const expShade = Math.min(230, 50 + 5 * 8);
+      const expRgb = `rgb(${expShade},${expShade},${expShade})`;
+      const t5 = (function(){
+        const color = (function(role, size){
+          if (role === 'L') return '#b3d9ff';
+          if (role === 'R') return '#ffd9b3';
+          if (role === 'LF') return '#66b3ff';
+          if (role === 'RF') return '#ffb366';
+          if (role === 'IF') return '#cdeccd';
+          const shade = Math.min(230, 50 + size * 8);
+          return `rgb(${shade},${shade},${shade})`;
+        })('I', 5);
+        return color === expRgb;
+      })();
+      results.push({name:'T5 segFill rgb', pass: t5, detail:`expected=${expRgb}`});
+
+      // T6: filas de empujador por distancia con pitch=1, paso=10in, offset=0 => 1,11,21 en 25 filas
+      const Pd = calcPusherRows(25, true, 'distance', 0, 0, 10, 0, 1);
+      const arrPd = Array.from(Pd).sort((a,b)=>a-b);
+      const t6 = JSON.stringify(arrPd) === JSON.stringify([1,11,21]);
+      results.push({name:'T6 pushers distance', pass: t6, detail:`rows=${arrPd.join(',')}`});
+
+      // T7: caso remain=0 => solo orillas
+      const patsEO = makeRowPatterns(24, [12], [2]);
+      const t7 = patsEO.some(p => p.segments.length === 2 && p.segments[0].role === 'L' && p.segments[1].role === 'R');
+      results.push({name:'T7 edges-only', pass: t7, detail:`patterns=${patsEO.length}`});
+
+      setTestReport(results);
+    } catch (e) {
+      setTestReport([{name:'Exception', pass:false, detail: String(e)}]);
+    }
+  }
+
+  const warnings = [];
+  if (patternsNormal.length === 0) warnings.push("No hay patrones posibles con el ancho y los módulos seleccionados.");
+  if (uniqueSeamSets < 2 && numRows > 1) warnings.push("Solo hay 1 set de juntas; puede haber filas consecutivas con juntas coincidentes en casos extremos.");
+  if (usePushers && patternsFlight.length === 0) warnings.push("Empujadores activos, pero no hay patrones de empujadores con los tamaños seleccionados.");
+  if (usePushers && pusherRows.size === 0) warnings.push("Empujadores activos, pero la configuración de paso/offset no genera ninguna fila.");
+
+  function formatSize(sz){ return `${sz}L (${(sz*inc).toFixed(2)}` + '"' + `)`; }
+
+  return (
+    <div className="p-6 space-y-6">
+      <h1 className="text-2xl font-bold">Calculadora de módulos de banda – Canvas</h1>
+      <p className="text-sm text-gray-600">Reglas: orillas a extremos; priorizar menos piezas y módulos grandes; evitar alineación vertical de juntas; patrón ladrillo si es necesario; dos orillas juntas solo si su suma = ancho total.</p>
+
+      <div className="grid lg:grid-cols-3 gap-4">
+        <div className="p-4 rounded-2xl shadow bg-white space-y-3">
+          <h2 className="font-semibold">Serie / Geometría</h2>
+          <div className="grid grid-cols-2 gap-2 items-center">
+            <label className="text-sm">Pitch (in)</label>
+            <input type="number" step="0.01" value={pitch} onChange={e=>setPitch(parseFloat(e.target.value||"0")||0)} className="border rounded px-2 py-1"/>
+            <label className="text-sm">Incremento por link (in)</label>
+            <input type="number" step="0.01" value={inc} onChange={e=>setInc(parseFloat(e.target.value||"0")||0)} className="border rounded px-2 py-1"/>
+          </div>
+          <h2 className="font-semibold mt-4">Parámetros</h2>
+          <div className="grid grid-cols-2 gap-2 items-center">
+            <label className="text-sm">Ancho (in)</label>
+            <input type="number" step="0.01" value={widthIn} onChange={e=>setWidthIn(parseFloat(e.target.value||"0")||0)} className="border rounded px-2 py-1"/>
+            <label className="text-sm">Largo (in)</label>
+            <input type="number" step="0.01" value={lengthIn} onChange={e=>setLengthIn(parseFloat(e.target.value||"0")||0)} className="border rounded px-2 py-1"/>
+            <label className="text-sm">Redondeo</label>
+            <select value={rounding} onChange={e=>setRounding(e.target.value)} className="border rounded px-2 py-1">
+              <option value="round">round</option>
+              <option value="floor">floor</option>
+              <option value="ceil">ceil</option>
+            </select>
+            <label className="text-sm">px por link</label>
+            <input type="number" value={pxPerLink} onChange={e=>setPxPerLink(parseInt(e.target.value||"1"))} className="border rounded px-2 py-1"/>
+          </div>
+
+          <div className="mt-4">
+            <h3 className="font-semibold">Orillas disponibles (links)</h3>
+            <TagSelect label="Agregar orilla" options={allSizes} selected={edgeSel} onChange={setEdgeSel} format={formatSize} />
+          </div>
+          <div className="mt-2">
+            <h3 className="font-semibold">Internos disponibles (links)</h3>
+            <TagSelect label="Agregar interno" options={allSizes} selected={intSel} onChange={setIntSel} format={formatSize} />
+          </div>
+
+          <div className="mt-4">
+            <h3 className="font-semibold">Empujadores (Flights/Friction Top)</h3>
+            <label className="text-sm inline-flex items-center gap-2">
+              <input type="checkbox" checked={usePushers} onChange={e=>setUsePushers(e.target.checked)} />
+              Activar empujadores
+            </label>
+            {usePushers && (
+              <>
+                <div className="grid grid-cols-2 gap-2 items-center mt-2">
+                  <label className="text-sm">Modo</label>
+                  <select value={pusherMode} onChange={e=>setPusherMode(e.target.value)} className="border rounded px-2 py-1">
+                    <option value="rows">por filas</option>
+                    <option value="distance">por distancia (in)</option>
+                  </select>
+                  {pusherMode === 'rows' ? (
+                    <>
+                      <label className="text-sm">Paso (filas)</label>
+                      <input type="number" min="1" value={pusherStepRows} onChange={e=>setPusherStepRows(parseInt(e.target.value||"1"))} className="border rounded px-2 py-1"/>
+                      <label className="text-sm">Offset (filas)</label>
+                      <input type="number" min="0" value={pusherOffsetRows} onChange={e=>setPusherOffsetRows(parseInt(e.target.value||"0"))} className="border rounded px-2 py-1"/>
+                    </>
+                  ) : (
+                    <>
+                      <label className="text-sm">Paso (in)</label>
+                      <input type="number" step="0.01" min="0.01" value={pusherStepIn} onChange={e=>setPusherStepIn(parseFloat(e.target.value||"0"))} className="border rounded px-2 py-1"/>
+                      <label className="text-sm">Offset (in)</label>
+                      <input type="number" step="0.01" min="0" value={pusherOffsetIn} onChange={e=>setPusherOffsetIn(parseFloat(e.target.value||"0"))} className="border rounded px-2 py-1"/>
+                    </>
+                  )}
+                </div>
+                <div className="mt-2">
+                  <h4 className="font-medium text-sm">Orillas empujador (Flights/Friction Top) (links)</h4>
+                  <TagSelect label="Agregar orilla empujador" options={allSizes} selected={edgeFlightSel} onChange={setEdgeFlightSel} format={formatSize} />
+                </div>
+                <div className="mt-2">
+                  <h4 className="font-medium text-sm">Internos empujador (Flights/Friction Top) (links)</h4>
+                  <TagSelect label="Agregar interno empujador" options={allSizes} selected={intFlightSel} onChange={setIntFlightSel} format={formatSize} />
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <button onClick={()=>setCalcTick(t=>t+1)} className="px-3 py-1 border rounded-lg bg-black/80 text-white">Calcular</button>
+            <button onClick={exportBOM} className="px-3 py-1 border rounded-lg">Exportar BOM</button>
+            <button onClick={exportPlanJSON} className="px-3 py-1 border rounded-lg">Exportar JSON</button>
+            <button onClick={exportSeamsCSV} className="px-3 py-1 border rounded-lg">Exportar Juntas</button>
+            <button onClick={runSelfTests} className="px-3 py-1 border rounded-lg">Ejecutar tests</button>
+          </div>
+        </div>
+
+        <div className="p-4 rounded-2xl shadow bg-white space-y-3">
+          <h2 className="font-semibold">Resumen</h2>
+          <ul className="text-sm list-disc pl-5 space-y-1">
+            <li>Ancho en links: <b>{widthLinks}</b></li>
+            <li>Ancho real: <b>{widthRealIn.toFixed(3)}"</b> ({widthLinks}L × {inc}"/L)</li>
+            <li>Filas: <b>{numRows}</b></li>
+            <li>Patrones generados: <b>{patternsNormal.length}</b> (normal) + <b>{patternsFlight.length}</b> (empujador)</li>
+            <li>Sets de juntas únicos: <b>{uniqueSeamSets}</b></li>
+            <li>Empujadores: <b>{usePushers ? (pusherRows.size + ' filas') : 'desactivado'}</b></li>
+          </ul>
+          {warnings.length > 0 && (
+            <div className="mt-2 p-2 rounded bg-yellow-50 border border-yellow-200 text-yellow-900 text-sm">
+              <b>Atención:</b>
+              <ul className="list-disc pl-5">
+                {warnings.map((w, i) => <li key={i}>{w}</li>)}
+              </ul>
+            </div>
+          )}
+
+          {testReport && (
+            <div className="mt-2 p-2 rounded bg-blue-50 border border-blue-200 text-blue-900 text-sm">
+              <b>Resultados de tests:</b>
+              <ul className="list-disc pl-5">
+                {testReport.map((t, i) => (
+                  <li key={i}><b>{t.pass ? '✔' : '✖'}</b> {t.name} — {t.detail}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <h3 className="font-semibold mt-3">BOM</h3>
+          <table className="w-full text-sm border border-gray-200">
+            <thead>
+              <tr className="bg-gray-50"><th className="border p-1">Módulo (rol:tamaño)</th><th className="border p-1">Cantidad</th></tr>
+            </thead>
+            <tbody>
+              {Object.entries(bom).map(([k,v]) => (
+                <tr key={k}><td className="border p-1">{k}</td><td className="border p-1 text-right">{v}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="p-4 rounded-2xl shadow bg-white space-y-3 col-span-1 lg:col-span-1">
+          <h2 className="font-semibold">Juntas por fila</h2>
+          <div className="max-h-64 overflow-auto border rounded p-2 text-sm">
+            {rows.map((r, idx) => (
+              <div key={idx} className="flex items-center gap-2"><span className="w-14 text-gray-500">{idx+1}{pusherRows.has(idx+1) ? " •E" : ""}.</span><span>{[...r.seams].sort((a,b)=>a-b).join(" ") || "(sin juntas internas)"}</span></div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="p-4 rounded-2xl shadow bg-white">
+        <h2 className="font-semibold mb-2">Diagrama</h2>
+        <div className="overflow-auto border rounded">
+          <svg width={svgWidth} height={svgHeight} viewBox={`0 0 ${svgWidth} ${svgHeight}`} xmlns="http://www.w3.org/2000/svg">
+            <rect x={0} y={0} width={svgWidth} height={svgHeight} fill="#fff" />
+            {rows.map((r, rowIdx) => {
+              let x = 0; const y = rowGap + rowIdx * (rowH + rowGap);
+              return (
+                <g key={rowIdx}>
+                  {r.segments.map((seg, i) => {
+                    const w = seg.size * pxPerLink;
+                    const rect = (
+                      <rect key={i} x={x} y={y} width={w} height={rowH} fill={segFill(seg.role, seg.size)} stroke="#111" strokeWidth={1}/>
+                    );
+                    x += w;
+                    return rect;
+                  })}
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-500">Tip: ajusta <i>px por link</i> para visualizar anchos grandes sin scroll horizontal excesivo.</p>
+    </div>
+  );
+}
