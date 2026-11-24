@@ -2,6 +2,117 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-slate-100 text-slate-900;
+/*
+ * Tokens de color (RGB). Los colores de módulo se repiten como hex en
+ * src/features/belt-planner/components/diagramTheme.ts porque el SVG exportado
+ * no puede depender de estas variables.
+ */
+:root {
+  --paper: 241 243 242; /* papel de plano */
+  --surface: 255 255 255;
+  --sunken: 232 236 236;
+  --ink: 26 37 48; /* grafito */
+  --ink-muted: 77 90 103;
+  --line: 205 212 216;
+  --line-strong: 140 152 163;
+  --primary: 31 78 121;
+  --primary-hover: 24 62 97;
+  --on-primary: 255 255 255;
+  --module-inner: 51 110 173; /* azul acetal */
+  --module-edge: 176 192 208; /* gris acero */
+  --pusher: 242 194 48; /* amarillo seguridad */
+  --pusher-edge: 214 160 20;
+  --alert: 190 40 36;
+  --alert-soft: 251 234 232;
+  --info-soft: 230 238 246;
+  color-scheme: light;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-paper font-sans text-ink antialiased;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  :focus-visible {
+    outline: 2px solid rgb(var(--primary));
+    outline-offset: 2px;
+  }
+
+  /* Cifras de ancho fijo para que las columnas numéricas no bailen. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  /*
+   * Panel sticky que cabe en la ventana: `--fit-max-h` lo calcula useFitToViewport según la posición
+   * real del panel (descuenta el encabezado mientras se ve). Solo en pantallas anchas, donde es sticky.
+   */
+  @media (min-width: 1024px) {
+    .fit-viewport {
+      max-height: var(--fit-max-h, calc(100dvh - 2rem));
+    }
+  }
+
+  .field-input {
+    @apply h-10 w-full rounded border border-line-strong bg-surface px-2.5 text-[15px] text-ink tabular;
+    @apply placeholder:text-ink-muted/70 hover:border-ink-muted;
+  }
+
+  .field-input[aria-invalid='true'] {
+    @apply border-alert;
+  }
+
+  /* Solo lectura: el valor viene del catálogo. Fondo hundido y borde punteado, distinto de deshabilitado. */
+  .field-input[readonly] {
+    @apply cursor-default border-dashed border-line-strong bg-sunken hover:border-line-strong;
+  }
+
+  .field-select {
+    @apply h-10 w-full cursor-pointer rounded border border-line-strong bg-surface px-2 text-[15px] text-ink hover:border-ink-muted;
+  }
+
+  .btn {
+    @apply inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded px-3 text-sm font-medium transition-colors duration-150;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply bg-primary text-on-primary hover:bg-primary-hover;
+  }
+
+  .btn-secondary {
+    @apply border border-line-strong bg-surface text-ink hover:border-ink-muted hover:bg-sunken;
+  }
+
+  .btn-quiet {
+    @apply h-8 px-2 text-ink-muted hover:bg-sunken hover:text-ink;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+@media print {
+  @page {
+    margin: 12mm;
+  }
+
+  body {
+    background: white;
+    font-size: 11pt;
+  }
 }

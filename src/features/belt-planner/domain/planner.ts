@@ -1,206 +1,284 @@
-import { FlightConfig, PlannerInput, RowPattern, Segment } from '../types';
+import { BomLine, FlightConfig, PlanNotice, PlannedRow, PlannerInput, PlanResult, PlanStats, RowPattern } from '../types';
+import { formatCount, formatInches, formatLength, formatPlainNumber, LENGTH_UNIT_NAMES, ROUNDING_LABELS } from '../utils/format';
+import { buildBom, totalBomQuantity } from './bom';
+import { firstBlockedRow } from './cleanLayout';
+import { layoutRows } from './layout';
+import { moduleSupply } from './cuts';
+import { buildPatterns, PatternOptions } from './patterns';
+import { computePusherRows, pusherEdgeSupply, resolvePusherEdges, resolvePusherSpacing } from './pushers';
+import { sharedSeams } from './seams';
+import { calculateRows, inchesToLength, roundLinks } from './units';
 
-export function roundLinks(widthInches: number, incrementInches: number, mode: 'round' | 'floor' | 'ceil'): number {
-  const links = widthInches / incrementInches;
-  if (mode === 'floor') return Math.floor(links);
-  if (mode === 'ceil') return Math.ceil(links);
-  return Math.round(links);
-}
+// Reexportaciones para que los consumidores existentes sigan importando desde `planner`.
+export { buildBom, totalBomQuantity } from './bom';
+export { combinationsForTarget, combinationsOfPieceCount, normalizeSizes } from './combinations';
+export { layoutRows } from './layout';
+export { brickRotations, buildPatterns, comparePatterns, createRowPattern, rotateInnerModules } from './patterns';
+export type { PatternOptions } from './patterns';
+export { computePusherRows, resolvePusherEdges, resolvePusherSpacing } from './pushers';
+export { calculateSeams, countSharedSeams, sharedSeams } from './seams';
+export { calculateRows, minimumLinksFor, roundLinks, snapNearInteger } from './units';
 
-export function calculateRows(lengthInches: number, pitchInches: number): number {
-  return Math.max(1, Math.round(lengthInches / pitchInches));
-}
+const MEASURE_TOLERANCE = 1e-9;
 
-export function combinationsForTarget(target: number, sizes: number[], limit = 1500): number[][] {
-  const uniqueDesc = [...new Set(sizes)].filter((size) => size > 0).sort((a, b) => b - a);
-  const result: number[][] = [];
-
-  function dfs(remaining: number, index: number, current: number[]): void {
-    if (result.length >= limit) return;
-    if (remaining === 0) {
-      result.push([...current]);
-      return;
-    }
-    if (remaining < 0 || index >= uniqueDesc.length) return;
-
-    const value = uniqueDesc[index];
-    const maxCount = Math.floor(remaining / value);
-
-    for (let count = maxCount; count >= 0; count -= 1) {
-      for (let i = 0; i < count; i += 1) current.push(value);
-      dfs(remaining - value * count, index + 1, current);
-      current.length -= count;
-    }
-  }
-
-  dfs(target, 0, []);
-  return result;
-}
-
-export function calculateSeams(segments: Segment[]): number[] {
-  const seams: number[] = [];
-  let cursor = 0;
-  segments.forEach((segment, index) => {
-    cursor += segment.size;
-    if (index < segments.length - 1 && segment.role !== 'edge-right') {
-      seams.push(cursor);
-    }
+function computeStats(rows: readonly PlannedRow[], bom: readonly BomLine[]): PlanStats {
+  let alignedSeamCount = 0;
+  let rowsWithAlignment = 0;
+  let maxAlignedSeamsInRow = 0;
+  rows.forEach((row) => {
+    const aligned = row.alignedSeams.length;
+    alignedSeamCount += aligned;
+    if (aligned > 0) rowsWithAlignment += 1;
+    maxAlignedSeamsInRow = Math.max(maxAlignedSeamsInRow, aligned);
   });
-  return seams;
-}
-
-function scorePieces(innerModules: number[]): number {
-  const countPenalty = innerModules.length * 1000;
-  const sizeBonus = innerModules.reduce((sum, size) => sum + size, 0);
-  return countPenalty - sizeBonus;
-}
-
-export function buildPatterns(widthLinks: number, edges: number[], inners: number[], kind: 'normal' | 'pusher'): RowPattern[] {
-  const patterns: RowPattern[] = [];
-  const uniqueEdges = [...new Set(edges)].filter((edge) => edge > 0).sort((a, b) => b - a);
-
-  uniqueEdges.forEach((leftEdge) => {
-    uniqueEdges.forEach((rightEdge) => {
-      const remaining = widthLinks - leftEdge - rightEdge;
-      if (remaining < 0) return;
-      if (remaining === 0) {
-        patterns.push(buildPattern(leftEdge, [], rightEdge, kind));
-        return;
-      }
-      const combos = combinationsForTarget(remaining, inners);
-      combos.forEach((inner) => patterns.push(buildPattern(leftEdge, inner, rightEdge, kind)));
-    });
-  });
-
-  return dedupeAndSortPatterns(patterns);
-}
-
-function buildPattern(leftEdge: number, inner: number[], rightEdge: number, kind: 'normal' | 'pusher'): RowPattern {
-  const segments: Segment[] = [
-    { size: leftEdge, role: 'edge-left', kind },
-    ...inner.map((size) => ({ size, role: 'inner' as const, kind })),
-    { size: rightEdge, role: 'edge-right', kind }
-  ];
 
   return {
-    segments,
-    seams: calculateSeams(segments),
-    score: scorePieces(inner)
+    totalPieces: totalBomQuantity(bom),
+    normalPieces: totalBomQuantity(bom, 'normal'),
+    pusherPieces: totalBomQuantity(bom, 'pusher'),
+    alignedSeamCount,
+    rowsWithAlignment,
+    maxAlignedSeamsInRow,
+    uniqueSeamSets: new Set(rows.map((row) => row.seams.join(','))).size,
+    pusherRowsBuilt: rows.filter((row) => row.kind === 'pusher').length,
+    cutPieces: bom.filter((line) => line.cutFromLinks !== undefined).reduce((sum, line) => sum + line.quantity, 0)
   };
 }
 
-export function rotateInnerModules(pattern: RowPattern): RowPattern[] {
-  const left = pattern.segments[0];
-  const right = pattern.segments[pattern.segments.length - 1];
-  const inner = pattern.segments.slice(1, -1).map((segment) => segment.size);
-  if (inner.length <= 1) return [pattern];
-
-  const variants: RowPattern[] = [];
-  for (let offset = 0; offset < inner.length; offset += 1) {
-    const rotated = inner.slice(offset).concat(inner.slice(0, offset));
-    variants.push(buildPattern(left.size, rotated, right.size, left.kind));
-  }
-  return dedupeAndSortPatterns(variants);
-}
-
-function seamOverlap(a: number[], b: number[]): number {
-  const setB = new Set(b);
-  return a.reduce((acc, seam) => acc + (setB.has(seam) ? 1 : 0), 0);
-}
-
-function dedupeAndSortPatterns(patterns: RowPattern[]): RowPattern[] {
-  const map = new Map<string, RowPattern>();
-  patterns.forEach((pattern) => {
-    const key = pattern.segments.map((segment) => `${segment.role}:${segment.size}`).join('|');
-    if (!map.has(key)) map.set(key, pattern);
-  });
-
-  return [...map.values()].sort((a, b) => a.score - b.score);
-}
-
-export function chooseRows(patterns: RowPattern[], rowsCount: number): RowPattern[] {
+/** Juntas presentes en todos los patrones: ninguna elección de fila puede evitar que coincidan. */
+function seamsSharedByAllPatterns(patterns: readonly RowPattern[]): number[] {
   if (patterns.length === 0) return [];
-  const firstVariants = rotateInnerModules(patterns[0]);
-  const candidates = [...firstVariants, ...patterns];
-
-  const rows: RowPattern[] = [candidates[0]];
-  for (let row = 1; row < rowsCount; row += 1) {
-    let best = candidates[0];
-    let bestOverlap = Number.POSITIVE_INFINITY;
-    candidates.forEach((candidate) => {
-      const overlap = seamOverlap(rows[row - 1].seams, candidate.seams);
-      if (overlap < bestOverlap) {
-        bestOverlap = overlap;
-        best = candidate;
-      }
-    });
-    rows.push(best);
-  }
-  return rows;
+  return patterns.slice(1).reduce((shared, pattern) => sharedSeams(shared, pattern.seams), [...patterns[0].seams]);
 }
 
-export function computePusherRows(config: FlightConfig, rowsCount: number, pitchInches: number): Set<number> {
-  const rows = new Set<number>();
-  if (!config.enabled) return rows;
-
+function describeRequestedSpacing(config: FlightConfig, value: 'step' | 'offset'): string {
   if (config.mode === 'rows') {
-    const step = Math.max(1, config.stepRows);
-    const offset = Math.max(0, config.offsetRows);
-    for (let row = 1 + offset; row <= rowsCount; row += step) rows.add(row);
-    return rows;
+    const rows = value === 'step' ? config.stepRows : config.offsetRows;
+    return formatCount(rows, 'fila', 'filas');
+  }
+  return `${formatPlainNumber(value === 'step' ? config.stepInches : config.offsetInches)} in`;
+}
+
+const joinPositions = (seams: readonly number[]) =>
+  seams.length === 1 ? `${seams[0]}` : `${seams.slice(0, -1).join(', ')} y ${seams[seams.length - 1]}`;
+
+/**
+ * Explica por qué no hay armado sin juntas alineadas (combinación inválida): en qué fila se traba y,
+ * si se puede saber, qué juntas lo obligan.
+ */
+function describeSeamConflict(input: PlannerInput, plan: Omit<PlanResult, 'notices'>, blockedRow: number | null): string {
+  const { patternsNormal, patternsPusher, pusherEdges } = plan;
+  const blockedRowIsPusher = blockedRow !== null && plan.pusherRows.includes(blockedRow) && patternsPusher.length > 0;
+  const where =
+    blockedRow !== null
+      ? ` Desde la fila 1 no se puede llegar a la fila ${blockedRow}${blockedRowIsPusher ? ' (de empujador)' : ''} sin que alguna fila comparta juntas con la anterior.`
+      : '';
+
+  const causes: string[] = [];
+  const pusherRowsBuilt = patternsPusher.length > 0 && plan.pusherRows.length > 0;
+  const forcedPusher = pusherRowsBuilt ? seamsSharedByAllPatterns(patternsPusher) : [];
+  if (forcedPusher.length > 0) {
+    const fixedEdges =
+      pusherEdges?.fit === 'exact' && pusherEdges.minEdgeLinks
+        ? ` (orillas fijas de ${pusherEdges.minEdgeLinks}L por el indent deseado de ${formatPlainNumber(pusherEdges.indentInches!)} in)`
+        : '';
+    const avoiding = patternsNormal.filter((pattern) => sharedSeams(pattern.seams, forcedPusher).length === 0).length;
+    causes.push(
+      `Todas las filas de empujador tienen juntas en ${joinPositions(forcedPusher)} links${fixedEdges}; ` +
+        (avoiding === 0
+          ? 'ningún armado normal las evita.'
+          : `solo ${formatCount(avoiding, 'armado normal las evita', 'armados normales las evitan')}, de ${patternsNormal.length}.`)
+    );
+  }
+  const forcedNormal = seamsSharedByAllPatterns(patternsNormal);
+  if (forcedNormal.length > 0) {
+    causes.push(`Las juntas en ${joinPositions(forcedNormal)} links aparecen en todos los armados normales, así que dos filas normales seguidas siempre las alinean.`);
   }
 
-  const stepInRows = Math.max(1, Math.round(config.stepInches / pitchInches));
-  const offsetRows = Math.max(0, Math.round(config.offsetInches / pitchInches));
-  for (let row = 1 + offsetRows; row <= rowsCount; row += stepInRows) rows.add(row);
-  return rows;
+  return (
+    `Combinación inválida: con estos tamaños no hay forma de armar las ${rowsCountText(plan.rowsCount)} sin juntas alineadas entre filas vecinas.` +
+    where +
+    (causes.length > 0 ? ` ${causes.join(' ')}` : '') +
+    ` Agrega tamaños de orilla o internos que den otras posiciones de junta${input.flightConfig.enabled ? ', o cambia el paso de los empujadores' : ''}.`
+  );
 }
 
-export function buildBom(rows: RowPattern[]): Record<string, number> {
-  const bom: Record<string, number> = {};
-  rows.forEach((row) => {
-    row.segments.forEach((segment) => {
-      const key = `${segment.kind}:${segment.role}:${segment.size}L`;
-      bom[key] = (bom[key] ?? 0) + 1;
+const rowsCountText = (rows: number) => formatCount(rows, 'fila', 'filas');
+
+function collectNotices(
+  input: PlannerInput,
+  plan: Omit<PlanResult, 'notices'>,
+  seamConflict: { blockedRow: number | null } | null
+): PlanNotice[] {
+  const warnings: string[] = [];
+  const infos: string[] = [];
+  const { widthLinks, rowsCount, pusherSpacing } = plan;
+  const flight = input.flightConfig;
+
+  if (plan.patternsNormal.length === 0) {
+    warnings.push(
+      `Ningún armado con los módulos normales seleccionados suma ${widthLinks} links. ` +
+        'Revisa que las orillas quepan en el ancho y agrega tamaños de módulo interno.'
+    );
+  }
+
+  const edges = plan.pusherEdges;
+  const edgeKindLabel = edges?.mode === 'normal' ? 'orilla normal' : 'orilla de empujador';
+  const exactIndent = edges?.fit === 'exact';
+  const indentText =
+    edges?.indentInches && edges.minEdgeLinks
+      ? (exactIndent
+          ? `el indent deseado de ${formatPlainNumber(edges.indentInches)} in pide orillas de exactamente ${edges.minEdgeLinks} links `
+          : `el indent de ${formatPlainNumber(edges.indentInches)} in pide al menos ${edges.minEdgeLinks} links `) +
+        `(${formatInches(edges.minEdgeLinks * input.linkIncrementInches)})`
+      : '';
+  const edgesBlockedByIndent = edges !== null && edges.usableSizes.length === 0 && edges.excludedSizes.length > 0;
+
+  if (edgesBlockedByIndent && plan.patternsNormal.length > 0) {
+    warnings.push(
+      exactIndent
+        ? `Ninguna ${edgeKindLabel} elegida da el indent: ${indentText}. ` +
+            `Las filas de empujador se armaron con módulos normales; agrega la orilla de ${edges.minEdgeLinks}L.`
+        : `Ninguna ${edgeKindLabel} elegida cubre el indent: ${indentText}. ` +
+            `Las filas de empujador se armaron con módulos normales; elige orillas de ${edges.minEdgeLinks}L o más.`
+    );
+  } else if (flight.enabled && plan.patternsNormal.length > 0 && plan.patternsPusher.length === 0) {
+    warnings.push(
+      `Ningún armado con los módulos de empujador seleccionados suma ${widthLinks} links, ` +
+        'así que las filas de empujador se armaron con módulos normales.'
+    );
+  }
+
+  if (edges && edges.usableSizes.length > 0 && edges.excludedSizes.length > 0) {
+    infos.push(
+      `En las filas de empujador no se usan las orillas de ${edges.excludedSizes.map((size) => `${size}L`).join(', ')}: ${indentText}.`
+    );
+  }
+
+  if (flight.enabled && pusherSpacing && plan.pusherRows.length === 0) {
+    warnings.push(
+      `Con paso de ${describeRequestedSpacing(flight, 'step')} y offset de ${describeRequestedSpacing(flight, 'offset')} ` +
+        `no cae ningún empujador dentro de las ${rowsCount} filas.`
+    );
+  }
+
+  if (seamConflict) warnings.push(describeSeamConflict(input, plan, seamConflict.blockedRow));
+
+  if (plan.stats.cutPieces > 0) {
+    // Una entrada por inventario y corte (orillas izquierda y derecha juntas).
+    const cuts = new Map<string, { label: string; quantity: number }>();
+    plan.bom.forEach((line) => {
+      if (line.cutFromLinks === undefined) return;
+      const key = `${line.kind}|${line.cutFromLinks}|${line.sizeLinks}`;
+      const entry = cuts.get(key) ?? { label: `de ${line.cutFromLinks}L a ${line.sizeLinks}L${line.kind === 'pusher' ? ' (empujador)' : ''}`, quantity: 0 };
+      entry.quantity += line.quantity;
+      cuts.set(key, entry);
     });
-  });
-  return Object.fromEntries(Object.entries(bom).sort(([a], [b]) => a.localeCompare(b)));
+    infos.push(
+      `Se cortan ${formatCount(plan.stats.cutPieces, 'módulo', 'módulos')} a un tamaño menor: ` +
+        `${[...cuts.values()].map((entry) => `${entry.quantity.toLocaleString('es-MX')} ${entry.label}`).join(', ')}. ` +
+        'La lista de materiales indica de qué tamaño sale cada pieza.'
+    );
+  }
+
+  if (Math.abs(plan.realWidthInches - plan.requestedWidthInches) > MEASURE_TOLERANCE) {
+    infos.push(
+      `El ancho quedó en ${widthLinks} links = ${formatInches(plan.realWidthInches)} ` +
+        `(se pidieron ${formatPlainNumber(plan.requestedWidthInches)} in, redondeo ${ROUNDING_LABELS[input.roundingMode]}).`
+    );
+  }
+
+  if (Math.abs(plan.realLengthInches - plan.requestedLengthInches) > MEASURE_TOLERANCE) {
+    const unit = input.lengthUnit;
+    const requested = unit
+      ? `${formatPlainNumber(inchesToLength(plan.requestedLengthInches, unit), 4)} ${LENGTH_UNIT_NAMES[unit].short}`
+      : `${formatPlainNumber(plan.requestedLengthInches)} in`;
+    const real = unit
+      ? `${formatLength(plan.realLengthInches, unit)} (${formatInches(plan.realLengthInches)})`
+      : formatInches(plan.realLengthInches);
+    infos.push(`El largo quedó en ${formatCount(rowsCount, 'fila', 'filas')} = ${real} (se pidieron ${requested}).`);
+  }
+
+  if (flight.enabled && pusherSpacing && flight.mode === 'distance') {
+    if (Math.abs(pusherSpacing.stepInches - flight.stepInches) > MEASURE_TOLERANCE) {
+      infos.push(
+        `El paso de empujadores de ${formatPlainNumber(flight.stepInches)} in se ajustó a ` +
+          `${formatCount(pusherSpacing.stepRows, 'fila', 'filas')} = ${formatInches(pusherSpacing.stepInches)} para coincidir con el pitch.`
+      );
+    }
+    if (Math.abs(pusherSpacing.offsetInches - flight.offsetInches) > MEASURE_TOLERANCE) {
+      infos.push(
+        `El offset de empujadores de ${formatPlainNumber(flight.offsetInches)} in se ajustó a ` +
+          `${formatCount(pusherSpacing.offsetRows, 'fila', 'filas')} = ${formatInches(pusherSpacing.offsetInches)}.`
+      );
+    }
+  }
+
+  return [
+    ...warnings.map((message) => ({ level: 'warning' as const, message })),
+    ...infos.map((message) => ({ level: 'info' as const, message }))
+  ];
 }
 
-export function planBelt(input: PlannerInput) {
+/**
+ * Calcula el plan completo de armado: conversión a links y filas, patrones válidos por inventario,
+ * colocación de filas con anti-alineación de juntas, filas de empujador, BOM y avisos.
+ */
+export function planBelt(input: PlannerInput, options: PatternOptions = {}): PlanResult {
   const widthLinks = roundLinks(input.widthInches, input.linkIncrementInches, input.roundingMode);
   const rowsCount = calculateRows(input.lengthInches, input.pitchInches);
-  const patternsNormal = buildPatterns(widthLinks, input.edgesNormal, input.innerNormal, 'normal');
-  const patternsPusher = input.flightConfig.enabled
-    ? buildPatterns(widthLinks, input.edgesPusher, input.innerPusher, 'pusher')
+  const flight = input.flightConfig;
+
+  // Tamaños disponibles por inventario: los elegidos y, con el corte activo, los que salen de cortar uno mayor.
+  const allowCuts = input.allowCutModules ?? false;
+  const normalEdges = moduleSupply(input.edgesNormal, allowCuts);
+  const normalInner = moduleSupply(input.innerNormal, allowCuts);
+  const pusherInner = moduleSupply(input.innerPusher, allowCuts);
+
+  const patternsNormal = buildPatterns(widthLinks, normalEdges.sizes, normalInner.sizes, 'normal', {
+    ...options,
+    cutFrom: { edges: normalEdges.cutFrom, inner: normalInner.cutFrom }
+  });
+  const pusherEdges = resolvePusherEdges(input);
+  const patternsPusher = pusherEdges
+    ? buildPatterns(widthLinks, pusherEdges.usableSizes, pusherInner.sizes, 'pusher', {
+        ...options,
+        edgeKind: pusherEdges.mode === 'pusher' ? 'pusher' : 'normal',
+        cutFrom: { edges: pusherEdgeSupply(input).cutFrom, inner: pusherInner.cutFrom }
+      })
     : [];
 
-  const warnings: string[] = [];
-  if (patternsNormal.length === 0) warnings.push('No hay patrón normal válido con los módulos seleccionados.');
-  if (input.flightConfig.enabled && patternsPusher.length === 0) warnings.push('No hay patrón de empujador válido; se usarán filas normales.');
+  const pusherSpacing = flight.enabled ? resolvePusherSpacing(flight, input.pitchInches) : null;
+  const pusherRowSet = computePusherRows(flight, rowsCount, input.pitchInches);
 
-  const pusherRows = computePusherRows(input.flightConfig, rowsCount, input.pitchInches);
-  const normalRows = chooseRows(patternsNormal, rowsCount);
-  const pusherRowsBuilt = chooseRows(patternsPusher, rowsCount);
+  const layoutParams = {
+    rowsCount,
+    widthLinks,
+    normalPatterns: patternsNormal,
+    pusherPatterns: patternsPusher,
+    pusherRowNumbers: pusherRowSet
+  };
+  const rows = layoutRows(layoutParams);
+  // Hay patrones pero no filas: no existe armado sin juntas alineadas (combinación inválida).
+  const seamConflict = patternsNormal.length > 0 && rows.length === 0 ? { blockedRow: firstBlockedRow(layoutParams) } : null;
+  const bom = buildBom(rows, input.linkIncrementInches, input.bidirectional ?? false);
 
-  const rows = normalRows.map((normalRow, index) => {
-    const rowNumber = index + 1;
-    if (pusherRows.has(rowNumber) && pusherRowsBuilt[index]) return pusherRowsBuilt[index];
-    return normalRow;
-  });
-
-  const uniqueSeamSets = new Set(rows.map((row) => row.seams.join('-'))).size;
-
-  return {
+  const plan: Omit<PlanResult, 'notices'> = {
     widthLinks,
     realWidthInches: widthLinks * input.linkIncrementInches,
+    requestedWidthInches: input.widthInches,
     rowsCount,
+    realLengthInches: rowsCount * input.pitchInches,
+    requestedLengthInches: input.lengthInches,
     patternsNormal,
     patternsPusher,
     rows,
-    pusherRows,
-    warnings,
-    uniqueSeamSets,
-    bom: buildBom(rows)
+    pusherRows: [...pusherRowSet].sort((a, b) => a - b),
+    pusherSpacing,
+    pusherEdges,
+    stats: computeStats(rows, bom),
+    bom
   };
+
+  return { ...plan, notices: collectNotices(input, plan, seamConflict) };
 }

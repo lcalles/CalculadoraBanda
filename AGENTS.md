@@ -38,7 +38,7 @@ Nunca sacrifiques reglas de negocio clave solo por simplificar la implementació
 9. En empate, deben favorecerse piezas más grandes.
 10. Deben calcularse las juntas internas de cada fila.
 11. Debe evitarse la alineación vertical de juntas entre filas adyacentes.
-12. Si no hay solución sin coincidencias, debe elegirse la de menor solape.
+12. Una junta alineada entre filas adyacentes hace inválida la combinación: si no hay solución sin coincidencias, no se entrega plan y se explica la causa. (Antes se elegía la de menor solape; cambió a pedido de producción.)
 13. Deben generarse variantes tipo patrón ladrillo mediante rotación de módulos internos cuando sirva para diversificar patrones.
 14. Debe soportarse configuración de filas con empujadores / flights / friction top.
 15. Las filas con empujador usan inventario propio de módulos de empujador, pero la geometría del armado debe mantenerse coherente.
