@@ -1,12 +1,25 @@
 import { useMemo, useState } from 'react';
 import { PlannedRow } from '../types';
-import { formatComposition } from '../utils/format';
+import { formatComposition, formatCompositionInches, formatInchPosition, formatSeamsInches } from '../utils/format';
 
 /** Filas por página de la tabla (el diagrama solo dibuja las primeras; aquí están todas). */
 const ROWS_PER_PAGE = 200;
 
-/** Juntas por fila, con filtro de filas que comparten juntas con la anterior. */
-export function SeamsTable({ rows }: { rows: readonly PlannedRow[] }) {
+/** Renglón secundario de una celda: la misma información en links. */
+function InLinks({ children }: { children: string }) {
+  return <span className="block text-[12px] leading-tight text-ink-muted/80">{children}</span>;
+}
+
+interface SeamsTableProps {
+  rows: readonly PlannedRow[];
+  linkIncrementInches: number;
+}
+
+/**
+ * Juntas por fila, con filtro de filas que comparten juntas con la anterior.
+ * Composición con el nombre en pulgadas de cada módulo y juntas en pulgadas redondeadas al cuarto; debajo, lo mismo en links.
+ */
+export function SeamsTable({ rows, linkIncrementInches }: SeamsTableProps) {
   const [onlyAligned, setOnlyAligned] = useState(false);
   const [visibleCount, setVisibleCount] = useState(ROWS_PER_PAGE);
   const alignedRows = useMemo(() => rows.filter((row) => row.alignedSeams.length > 0), [rows]);
@@ -35,7 +48,8 @@ export function SeamsTable({ rows }: { rows: readonly PlannedRow[] }) {
         </label>
       </div>
       <p className="border-b border-line px-3 py-1.5 text-[13px] text-ink-muted">
-        Posición de cada junta en links, medida desde la orilla izquierda.
+        Tamaño de cada módulo y posición de cada junta en pulgadas, redondeadas al cuarto; las juntas se miden desde la orilla izquierda.
+        Debajo, lo mismo en links.
       </p>
       {rows.length === 0 ? (
         <p className="px-3 py-6 text-sm text-ink-muted">Sin filas armadas.</p>
@@ -72,17 +86,28 @@ export function SeamsTable({ rows }: { rows: readonly PlannedRow[] }) {
                       )}
                       {row.rowNumber}
                     </th>
-                    <td className="px-3 py-1">{formatComposition(row.segments)}</td>
+                    <td className="px-3 py-1">
+                      {formatCompositionInches(row.segments, linkIncrementInches)}
+                      <InLinks>{formatComposition(row.segments)}</InLinks>
+                    </td>
                     <td className="px-3 py-1 text-ink-muted">
                       {row.seams.map((seam, index) => (
                         <span key={seam} className={aligned.has(seam) ? 'font-semibold text-alert' : undefined}>
                           {index > 0 ? ' ' : ''}
-                          {seam}
+                          {formatInchPosition(seam, linkIncrementInches)}
                         </span>
                       ))}
+                      <InLinks>{row.seams.join(' ')}</InLinks>
                     </td>
                     <td className={`px-3 py-1 ${aligned.size > 0 ? 'font-semibold text-alert' : 'text-ink-muted'}`}>
-                      {aligned.size > 0 ? row.alignedSeams.join(' ') : 'Ninguna'}
+                      {aligned.size > 0 ? (
+                        <>
+                          {formatSeamsInches(row.alignedSeams, linkIncrementInches)}
+                          <InLinks>{row.alignedSeams.join(' ')}</InLinks>
+                        </>
+                      ) : (
+                        'Ninguna'
+                      )}
                     </td>
                   </tr>
                 );

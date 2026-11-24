@@ -1,21 +1,25 @@
 import { BomLine, ModuleKind } from '../types';
-import { KIND_LABELS, ROLE_LABELS } from '../utils/format';
+import { formatInches, formatModuleInches, KIND_LABELS, ROLE_LABELS } from '../utils/format';
 import { moduleKey, ModuleColor } from '../utils/moduleColors';
 
 const KINDS: ModuleKind[] = ['normal', 'pusher'];
+/** Rol, tamaño, links, ancho real y cantidad. */
+const COLUMN_COUNT = 5;
 
 /**
  * Lista de materiales por tipo de inventario, rol y tamaño, con subtotales.
- * Las piezas cortadas dicen de qué módulo salen: "9L cortado a 7L".
+ * El tamaño va en pulgadas (nombre redondeado al cuarto) y los links en su propia columna.
+ * Las piezas cortadas dicen de qué módulo salen: "3 in cortado a 2.25 in" y "9L → 7L".
  */
 interface BomTableProps {
   bom: readonly BomLine[];
+  linkIncrementInches: number;
   pusherLabel?: string | null;
   /** Paleta del plan, para que cada línea muestre el color de su módulo en el diagrama. */
   moduleColors: ReadonlyMap<string, ModuleColor>;
 }
 
-export function BomTable({ bom, pusherLabel = null, moduleColors }: BomTableProps) {
+export function BomTable({ bom, linkIncrementInches, pusherLabel = null, moduleColors }: BomTableProps) {
   const total = bom.reduce((sum, line) => sum + line.quantity, 0);
   const groups = KINDS.map((kind) => ({ kind, lines: bom.filter((line) => line.kind === kind) })).filter(
     (group) => group.lines.length > 0
@@ -43,7 +47,10 @@ export function BomTable({ bom, pusherLabel = null, moduleColors }: BomTableProp
                   Tamaño
                 </th>
                 <th scope="col" className="px-3 py-1.5 text-right font-medium">
-                  Ancho
+                  Links
+                </th>
+                <th scope="col" className="px-3 py-1.5 text-right font-medium">
+                  Ancho real
                 </th>
                 <th scope="col" className="px-3 py-1.5 text-right font-medium">
                   Cantidad
@@ -55,7 +62,7 @@ export function BomTable({ bom, pusherLabel = null, moduleColors }: BomTableProp
               return (
                 <tbody key={group.kind}>
                   <tr className="bg-sunken/60">
-                    <th scope="colgroup" colSpan={4} className="px-3 py-1 text-left text-[13px] font-semibold">
+                    <th scope="colgroup" colSpan={COLUMN_COUNT} className="px-3 py-1 text-left text-[13px] font-semibold">
                       Módulos {group.kind === 'normal' ? 'normales' : `de empujador${pusherLabel ? `: ${pusherLabel}` : ''}`}
                     </th>
                   </tr>
@@ -72,23 +79,22 @@ export function BomTable({ bom, pusherLabel = null, moduleColors }: BomTableProp
                             <span className="sr-only"> {KIND_LABELS[line.kind].toLowerCase()}</span>
                           </span>
                         </td>
-                        <td className="px-3 py-1.5 text-right">
-                          {line.cutFromLinks !== undefined ? (
-                            <>
-                              <span className="text-ink-muted">{line.cutFromLinks}L cortado a </span>
-                              {line.sizeLinks}L
-                            </>
-                          ) : (
-                            `${line.sizeLinks}L`
+                        <td className="whitespace-nowrap px-3 py-1.5 text-right">
+                          {line.cutFromLinks !== undefined && (
+                            <span className="text-ink-muted">{formatModuleInches(line.cutFromLinks, linkIncrementInches)} cortado a </span>
                           )}
+                          {formatModuleInches(line.sizeLinks, linkIncrementInches)}
                         </td>
-                        <td className="px-3 py-1.5 text-right text-ink-muted">{line.widthInches.toFixed(3)} in</td>
+                        <td className="whitespace-nowrap px-3 py-1.5 text-right text-ink-muted">
+                          {line.cutFromLinks !== undefined ? `${line.cutFromLinks}L → ${line.sizeLinks}L` : `${line.sizeLinks}L`}
+                        </td>
+                        <td className="whitespace-nowrap px-3 py-1.5 text-right text-ink-muted">{formatInches(line.widthInches)}</td>
                         <td className="px-3 py-1.5 text-right font-semibold">{line.quantity.toLocaleString('es-MX')}</td>
                       </tr>
                   ))}
                   {groups.length > 1 && (
                     <tr className="border-b border-line">
-                      <th scope="row" colSpan={3} className="px-3 py-1.5 text-right text-[13px] font-medium text-ink-muted">
+                      <th scope="row" colSpan={COLUMN_COUNT - 1} className="px-3 py-1.5 text-right text-[13px] font-medium text-ink-muted">
                         Subtotal {KIND_LABELS[group.kind].toLowerCase()}
                       </th>
                       <td className="px-3 py-1.5 text-right font-semibold">{subtotal.toLocaleString('es-MX')}</td>
@@ -99,7 +105,7 @@ export function BomTable({ bom, pusherLabel = null, moduleColors }: BomTableProp
             })}
             <tfoot>
               <tr className="border-t-2 border-ink/70">
-                <th scope="row" colSpan={3} className="px-3 py-2 text-right font-semibold">
+                <th scope="row" colSpan={COLUMN_COUNT - 1} className="px-3 py-2 text-right font-semibold">
                   Total
                 </th>
                 <td className="px-3 py-2 text-right font-display text-base font-semibold">{total.toLocaleString('es-MX')}</td>

@@ -1,6 +1,6 @@
 import { ReactNode } from 'react';
 import { PlannerInput, PlanResult } from '../types';
-import { formatCount, formatInches, formatLength, formatPlainNumber } from '../utils/format';
+import { formatCount, formatInches, formatLength, formatModuleSize, formatPlainNumber } from '../utils/format';
 
 interface CellProps {
   label: string;
@@ -37,8 +37,8 @@ export function PlanTitleBlock({ input, result }: PlanTitleBlockProps) {
     >
       <Cell
         label="Ancho"
-        value={`${result.widthLinks} links`}
-        detail={`${formatInches(result.realWidthInches)} reales, ${formatPlainNumber(input.linkIncrementInches, 4)} in por link`}
+        value={formatInches(result.realWidthInches)}
+        detail={`${formatCount(result.widthLinks, 'link', 'links')} de ${formatPlainNumber(input.linkIncrementInches, 4)} in`}
       />
       <Cell
         label="Largo"
@@ -65,7 +65,7 @@ export function PlanTitleBlock({ input, result }: PlanTitleBlockProps) {
                 result.pusherEdges
                   ? `Orillas ${result.pusherEdges.mode === 'pusher' ? 'de empujador' : 'normales'}` +
                     (result.pusherEdges.minEdgeLinks
-                      ? ` de ${result.pusherEdges.minEdgeLinks}L${result.pusherEdges.fit === 'exact' ? '' : ' o más'}.`
+                      ? ` de ${formatModuleSize(result.pusherEdges.minEdgeLinks, input.linkIncrementInches)}${result.pusherEdges.fit === 'exact' ? '' : ' o más'}.`
                       : '.')
                   : null
               ]

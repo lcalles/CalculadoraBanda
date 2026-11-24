@@ -3,6 +3,7 @@ import { MoveHorizontal } from 'lucide-react';
 import { useElementWidth } from '../../../hooks/useElementWidth';
 import { PlannedRow } from '../types';
 import { fitPxPerLink, MAX_PX_PER_LINK, MIN_PX_PER_LINK, selectDiagramRows } from '../utils/diagramGeometry';
+import { formatModuleInches, formatPlainNumber } from '../utils/format';
 import { FAMILY_NAMES, FAMILY_ORDER, ModuleColor } from '../utils/moduleColors';
 import { BeltDiagram } from './BeltDiagram';
 
@@ -19,8 +20,14 @@ interface DrawingSheetProps {
 
 const SIDE_SUFFIX: Partial<Record<ModuleColor['role'], string>> = { 'edge-left': ' izq.', 'edge-right': ' der.' };
 
-/** Leyenda por familia: cada módulo del plan con su color y su tamaño, igual que en el diagrama. */
-function Legend({ moduleColors, hasPusherRows }: { moduleColors: ReadonlyMap<string, ModuleColor>; hasPusherRows: boolean }) {
+interface LegendProps {
+  moduleColors: ReadonlyMap<string, ModuleColor>;
+  hasPusherRows: boolean;
+  linkIncrementInches: number;
+}
+
+/** Leyenda por familia: cada módulo del plan con su color y su nombre en pulgadas (y sus links), igual que en el diagrama. */
+function Legend({ moduleColors, hasPusherRows, linkIncrementInches }: LegendProps) {
   const modules = [...moduleColors.values()];
   return (
     <div className="flex flex-wrap items-center gap-x-5 gap-y-2 border-b border-line px-3 py-2 text-[13px] text-ink-muted">
@@ -33,10 +40,12 @@ function Legend({ moduleColors, hasPusherRows }: { moduleColors: ReadonlyMap<str
             {items.map((module) => (
               <span
                 key={module.key}
-                className="tabular inline-flex h-5 min-w-[2rem] items-center justify-center border border-ink px-1 text-[12px] font-semibold"
+                className="tabular inline-flex h-5 min-w-[2rem] items-center justify-center gap-1 border border-ink px-1 text-[12px] font-semibold"
                 style={{ backgroundColor: module.fill, color: module.label }}
               >
-                {module.size}L{SIDE_SUFFIX[module.role] ?? ''}
+                {formatModuleInches(module.size, linkIncrementInches)}
+                <span className="font-normal opacity-80">{module.size}L</span>
+                {SIDE_SUFFIX[module.role] ?? ''}
               </span>
             ))}
           </span>
@@ -72,6 +81,8 @@ export const DrawingSheet = forwardRef<SVGSVGElement, DrawingSheetProps>(functio
 
   const fittedScale = fitPxPerLink(canvasWidth, widthLinks);
   const pxPerLink = manualScale ?? fittedScale;
+  // La escala se mueve por links (el dibujo se arma en links), pero se lee en píxeles por pulgada.
+  const pxPerInch = formatPlainNumber(pxPerLink / linkIncrementInches, 1);
   const { visible: visibleRows, hiddenCount, firstHiddenPusherRow } = selectDiagramRows(rows);
 
   return (
@@ -92,10 +103,10 @@ export const DrawingSheet = forwardRef<SVGSVGElement, DrawingSheetProps>(functio
             step={1}
             value={pxPerLink}
             onChange={(event) => setManualScale(Number(event.target.value))}
-            aria-valuetext={`${pxPerLink} píxeles por link`}
+            aria-valuetext={`${pxPerInch} píxeles por pulgada`}
             className="w-28 cursor-pointer accent-[rgb(var(--ink))]"
           />
-          <span className="tabular w-[4.5rem] text-[13px] text-ink-muted">{pxPerLink} px/link</span>
+          <span className="tabular w-[4.5rem] text-[13px] text-ink-muted">{pxPerInch} px/in</span>
           <button
             type="button"
             className="btn btn-secondary h-8 whitespace-nowrap px-2 text-[13px]"
@@ -108,7 +119,7 @@ export const DrawingSheet = forwardRef<SVGSVGElement, DrawingSheetProps>(functio
           </button>
         </div>
       </div>
-      <Legend moduleColors={moduleColors} hasPusherRows={hasPusherRows} />
+      <Legend moduleColors={moduleColors} hasPusherRows={hasPusherRows} linkIncrementInches={linkIncrementInches} />
 
       <div ref={canvasRef} className="max-h-[72vh] overflow-auto print:max-h-none print:overflow-visible">
         {rows.length > 0 ? (

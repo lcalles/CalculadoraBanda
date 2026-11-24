@@ -1,4 +1,5 @@
 import { availableModuleSizes } from '../domain/moduleSizes';
+import { formatInches, formatModuleNumber, formatModuleSize, formatModuleSizes } from '../utils/format';
 
 interface SizeSelectorProps {
   id: string;
@@ -16,7 +17,9 @@ interface SizeSelectorProps {
 }
 
 /**
- * Selección de tamaños de módulo (en links) con botones de alternar.
+ * Selección de tamaños de módulo con botones de alternar. Cada botón muestra el nombre del módulo en
+ * pulgadas (redondeado al cuarto) y debajo sus links; lo que se guarda y se calcula son los links.
+ * Sin incremento válido todavía, los botones muestran solo links.
  * Los tamaños elegidos fuera del rango ofrecido (p. ej. un 36L que quedó al cambiar a una banda de
  * incremento mayor) se siguen mostrando y se avisan: entran al cálculo, así que no deben quedar ocultos.
  */
@@ -47,18 +50,19 @@ export function SizeSelector({
     onChange(next.sort((a, b) => a - b));
   };
 
-  const sizeList = (list: readonly number[]) => list.map((size) => `${size}L`).join(', ');
+  const increment = linkIncrementInches && linkIncrementInches > 0 ? linkIncrementInches : null;
+  const sizeList = (list: readonly number[]) => formatModuleSizes(list, increment);
   const summary = [
     selected.length === 0
       ? 'Ningún tamaño seleccionado.'
       : `${selected.length === 1 ? '1 tamaño' : `${selected.length} tamaños`}: ${sizeList(selected)}.`,
     excludedSelected.length > 0
-      ? `No se usan por ser menores a ${minSize}L: ${sizeList(excludedSelected)}.`
+      ? `No se usan por ser menores a ${formatModuleSize(minSize!, increment)}: ${sizeList(excludedSelected)}.`
       : minSize !== null
-        ? `Mínimo ${minSize}L por el indent.`
+        ? `Mínimo ${formatModuleSize(minSize, increment)} por el indent.`
         : null,
     outOfRangeSelected.length > 0
-      ? `Fuera del rango para este incremento (hasta ${offeredSizes[offeredSizes.length - 1]}L), pero se usan: ${sizeList(outOfRangeSelected)}.`
+      ? `Fuera del rango para este incremento (hasta ${formatModuleSize(offeredSizes[offeredSizes.length - 1], increment)}), pero se usan: ${sizeList(outOfRangeSelected)}.`
       : null
   ]
     .filter(Boolean)
@@ -86,12 +90,13 @@ export function SizeSelector({
           </button>
         </span>
       </div>
-      <div className="mt-1 grid grid-cols-[repeat(auto-fill,minmax(2.6rem,1fr))] gap-1">
+      <div className={`mt-1 grid gap-1 ${increment ? 'grid-cols-[repeat(auto-fill,minmax(3rem,1fr))]' : 'grid-cols-[repeat(auto-fill,minmax(2.6rem,1fr))]'}`}>
         {shownSizes.map((size) => {
           const isSelected = selected.includes(size);
           const belowMin = isBelowMin(size);
           const outOfRange = !offeredSizes.includes(size);
-          const inches = linkIncrementInches ? ` = ${(size * linkIncrementInches).toFixed(3)} in` : '';
+          const name = formatModuleSize(size, increment);
+          const exact = increment ? `, ${formatInches(size * increment)} reales` : '';
           const stateClass = belowMin
             ? isSelected
               ? 'border-dashed border-alert bg-alert-soft text-alert line-through'
@@ -100,22 +105,32 @@ export function SizeSelector({
               ? `${outOfRange ? 'border-dashed border-alert' : 'border-ink'} bg-ink text-surface hover:bg-ink/85`
               : 'border-line bg-surface text-ink-muted hover:border-ink-muted hover:text-ink';
           const title = belowMin
-            ? `${size}L${inches}: menor al mínimo de ${minSize}L, no se usa`
+            ? `${name}${exact}: menor al mínimo de ${formatModuleSize(minSize!, increment)}, no se usa`
             : outOfRange
-              ? `${size}L${inches}: fuera del rango para este incremento; quítalo si no se usa`
-              : `${size}L${inches}`;
+              ? `${name}${exact}: fuera del rango para este incremento; quítalo si no se usa`
+              : `${name}${exact}`;
           return (
             <button
               key={size}
               type="button"
               aria-pressed={isSelected}
+              aria-label={name}
               disabled={belowMin && !isSelected}
               title={title}
               onClick={() => toggle(size)}
-              className={`tabular h-8 cursor-pointer rounded border text-sm font-medium transition-colors duration-150 ${stateClass}`}
+              className={`tabular cursor-pointer rounded border font-medium transition-colors duration-150 ${increment ? 'h-10' : 'h-8 text-sm'} ${stateClass}`}
             >
-              {size}
-              <span className="text-[11px] font-normal">L</span>
+              {increment ? (
+                <>
+                  <span className="block text-[13px] leading-tight">{formatModuleNumber(size, increment)}</span>
+                  <span className="block text-[11px] font-normal leading-tight opacity-75">{size}L</span>
+                </>
+              ) : (
+                <>
+                  {size}
+                  <span className="text-[11px] font-normal">L</span>
+                </>
+              )}
             </button>
           );
         })}

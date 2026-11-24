@@ -41,7 +41,7 @@ Las fuentes (Barlow y Barlow Semi Condensed) van incluidas en el build, así que
 5. **Empujadores.** Por paso en filas o por distancia en pulgadas, con offset. Las filas de empujador usan su propio inventario (orillas e internos) con el mismo ancho en links.
 6. **Resultados.**
    - Cajetín con el resumen y avisos con su causa.
-   - Diagrama SVG de las **primeras 20 filas** (bastan para ver el patrón), con cota de ancho, regla en links, filas numeradas, marca **E** en las filas de empujador y juntas alineadas en rojo. Si ninguna fila con empujador entra en esas 20, se indica cuál es la primera. Todas las filas siguen en la tabla de juntas y en las exportaciones.
+   - Diagrama SVG de las **primeras 20 filas** (bastan para ver el patrón), con cota de ancho, regla en pulgadas, filas numeradas, marca **E** en las filas de empujador y juntas alineadas en rojo. Si ninguna fila con empujador entra en esas 20, se indica cuál es la primera. Todas las filas siguen en la tabla de juntas y en las exportaciones.
    - BOM por tipo/rol/tamaño con subtotales.
    - Tabla de juntas por fila con filtro de filas alineadas.
 7. **Exportación.**
@@ -56,6 +56,24 @@ Las fuentes (Barlow y Barlow Semi Condensed) van incluidas en el build, así que
    - No entra al cálculo: cambiarlo no obliga a recalcular.
 
 El formulario se guarda en el navegador (`localStorage`) y el plan solo se recalcula al presionar **Calcular plan**, como en la versión validada.
+
+## Pulgadas y links
+
+Todo se muestra en **pulgadas primero y links como referencia**. El cálculo no cambia: las filas se arman, se comparan y se validan en links, porque así encajan los módulos.
+
+- **Nombre de cada módulo:** su ancho real redondeado al **cuarto de pulgada** más cercano, escrito en decimal (el medio cuarto sube). Con la S900 (0.33 in por link): 2L = 0.66 in → *0.75 in*; 3L = 0.99 in → *1 in*; 8L = 2.64 in → *2.75 in*; 9L = 2.97 in → *3 in*; 36L = 11.88 in → *12 in*.
+  - Se usa en los selectores de tamaño, el diagrama, la leyenda, la BOM, la composición de cada fila y los avisos, siempre con los links al lado: *3 in (9L)*.
+  - Con incrementos de 0.25 in o más (todas las bandas del catálogo), dos tamaños nunca comparten nombre. Con incrementos menores podrían coincidir; los links que acompañan al nombre los distinguen.
+- **Posición de las juntas:** también redondeada al cuarto. Se redondea la posición real (links × incremento), no la suma de los nombres de los módulos, para que el error no se acumule a lo ancho y nunca pase de 1/8 in. S900, juntas en los links 3, 21 y 33 (0.99, 6.93 y 10.89 in) → *1, 7 y 11 in*. Por eso la suma de los nombres de una fila puede no dar justo la posición de la junta: nueve módulos de 2L se nombran 0.75 in cada uno (6.75 in en total), y la junta está en 5.94 in → *6 in*. Con incrementos de 0.25 in o más, juntas en links distintos nunca se leen igual.
+- **Medidas exactas:** el ancho de la banda y el ancho real de cada módulo en la BOM van sin redondear.
+- **Diagrama:** la regla mide en pulgadas; la cota dice *11.880 in = 36 links*; cada módulo lleva su nombre en pulgadas y su texto emergente da también links, medida exacta y posición. La escala se lee en px/in.
+- **Exportación, pulgadas primero:**
+  - BOM CSV: `Tipo, Rol, Tamaño (in), Tamaño (links), Ancho real (in), Cantidad, Cortado de (in), Cortado de (links)`.
+  - Juntas CSV: `Fila, Tipo, Composición (in), Composición (links), Piezas, Juntas (in), Juntas (links), Juntas alineadas con fila anterior (in), Juntas alineadas con fila anterior (links)`.
+  - JSON versión 3: cada valor en pulgadas va antes que el de links (`sizeInches`/`size`, `cutFromInches`/`cutFrom`, `seamsInches`/`seams`, `alignedSeamsInches`/`alignedSeams`; en la BOM, `sizeInches`/`sizeLinks` y `cutFromInches`/`cutFromLinks`). Las claves en links de la versión 2 se conservan con el mismo nombre y significado. Tamaños y juntas en pulgadas van redondeados al cuarto, como en pantalla; `inchRoundingStep` indica ese paso (0.25). Los anchos (`widthInches`, `realWidthInches`) van exactos. `input` va tal como entró al cálculo, con los tamaños elegidos en links.
+  - Los nombres de archivo siguen con el ancho en links (`…-36L-180filas-bom.csv`).
+
+Funciones en `utils/format.ts` (`nominalModuleInches`, `inchPosition`, `formatModuleSize`…); pruebas en `tests/moduleNames.test.ts`.
 
 ## Catálogo de bandas
 
@@ -116,12 +134,12 @@ Un módulo más grande se puede cortar para obtener uno menor: con un 9L elegido
 
   La colocación de filas aplica el mismo orden al par de filas.
 - **Lista de materiales:**
-  - Las piezas cortadas van en su propia línea, por ejemplo *10 × "9L cortado a 7L"*.
-  - El CSV agrega la columna *Cortado de (links)* al final, sin mover las anteriores.
-  - El JSON marca cada pieza cortada con `cutFrom`.
-  - Un aviso resume los cortes, por ejemplo *"Se cortan 10 módulos a un tamaño menor: 10 de 9L a 7L"*.
+  - Las piezas cortadas van en su propia línea, por ejemplo, con la S900, *10 × "3 in cortado a 2.25 in"* y en la columna de links *9L → 7L*.
+  - El CSV llena las columnas *Cortado de (in)* y *Cortado de (links)*, al final.
+  - El JSON marca cada pieza cortada con `cutFromInches` y `cutFrom`.
+  - Un aviso resume los cortes, por ejemplo *"Se cortan 10 módulos a un tamaño menor: 10 de 3 in a 2.25 in (9L a 7L)"*.
   - En el diagrama, la descripción emergente de cada pieza dice de qué módulo sale.
-- **Indent deseado:** con el corte activo, la orilla exacta (por ejemplo, 3L) también puede salir de cortar una orilla normal mayor. El texto bajo el campo lo indica: *"…serán de 3L (0.990 in), cortadas de 6L"*.
+- **Indent deseado:** con el corte activo, la orilla exacta (por ejemplo, 3L) también puede salir de cortar una orilla normal mayor. El texto bajo el campo lo indica: *"…serán de 1 in (3L = 0.990 in), cortadas de 2 in (6L)"*.
 
 ## Estructura
 
@@ -177,6 +195,7 @@ Respecto a la versión React anterior (commit `6423e76`) y a la versión validad
 | Orillas en la BOM | Siempre separadas en izquierda y derecha. | Si la banda es bidireccional, la orilla izquierda y la derecha del mismo tamaño son la misma pieza y se suman en una línea "Orilla". Con sentido de marcha o banda personalizada, siguen separadas. | Son la misma pieza de inventario. |
 | Escala del diagrama | Fija en 14 px/link. | Control de escala y ajuste automático al ancho. | Requisito del prompt. |
 | Filas del diagrama | Se dibujaban todas las filas. | Solo las primeras 20, en pantalla, al imprimir y en el SVG. La tabla de juntas, el CSV y el JSON siguen con todas. | Pedido de ingeniería: 20 filas bastan para ver el patrón y el dibujo queda manejable. |
+| Unidad de la presentación | Links primero (selectores, diagrama, BOM, juntas, avisos) y pulgadas como referencia. BOM CSV: `Tipo, Rol, Tamaño (links), Ancho (in), Cantidad, Cortado de (links)`; juntas CSV solo en links; JSON v2. | Pulgadas primero y links como referencia. Cada módulo se nombra por su ancho redondeado al cuarto de pulgada, y cada junta por su posición real redondeada al cuarto; los anchos van exactos. CSV con columnas en pulgadas antes de las de links; JSON v3 con las claves en pulgadas agregadas antes de las de links (ver *Pulgadas y links*). El cálculo no cambia. | Pedido de ingeniería: en planta se trabaja en pulgadas. **Las columnas del CSV cambiaron de posición**: las plantillas que lo lean por posición deben ajustarse. |
 
 Exportaciones de código reemplazadas:
 
@@ -227,6 +246,7 @@ Las autopruebas del botón "Ejecutar tests" de la versión validada se migraron 
     - el sobrante del corte se considera desperdicio y no se reutiliza como otra pieza;
     - no se considera el ancho de la sierra ni una pérdida por corte;
     - el tamaño mínimo que se obtiene cortando es 2L, igual que el tamaño mínimo que se ofrece.
+20. El nombre en pulgadas de un módulo y la posición en pulgadas de una junta son solo para leerlos: redondean la medida real al cuarto de pulgada (un módulo nunca se nombra con menos de 0.25 in). Ninguna regla de armado los usa; todas trabajan en links (dos juntas están alineadas solo si caen en el mismo link), y la BOM sigue dando el ancho real exacto.
 
 ## Mejoras futuras sugeridas
 
@@ -240,5 +260,6 @@ Las autopruebas del botón "Ejecutar tests" de la versión validada se migraron 
 - Sideguards: alturas, indent propio y conteo en la BOM (2 por fila).
 - Indents de superficies especiales del manual (fricción, nubs, conos, rodillos, *indents* alternados de friction top) como referencia para filas especiales que no sean flights.
 - Importar un plan JSON para volver a abrirlo.
+- Nombres de archivo exportados con el ancho en pulgadas (hoy `…-36L-…`).
 - Indent de empujadores (flights que no llegan a la orilla) si producción lo requiere.
 - Cálculo en un Web Worker para que bandas muy grandes no congelen la página.

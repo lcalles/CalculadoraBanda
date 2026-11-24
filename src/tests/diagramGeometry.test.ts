@@ -5,6 +5,7 @@ import {
   DIAGRAM_ROW_LIMIT,
   diagramSize,
   fitPxPerLink,
+  INCH_RULER_STEPS,
   MAX_PX_PER_LINK,
   MIN_PX_PER_LINK,
   rulerTicks,
@@ -25,15 +26,29 @@ describe('geometría del diagrama', () => {
 
   it('la regla siempre numera el cero y el extremo derecho', () => {
     const ticks = rulerTicks(48, 18);
-    expect(ticks[0]).toEqual({ link: 0, major: true });
-    expect(ticks[ticks.length - 1]).toEqual({ link: 48, major: true });
-    const majors = ticks.filter((tick) => tick.major).map((tick) => tick.link);
+    expect(ticks[0]).toEqual({ position: 0, major: true });
+    expect(ticks[ticks.length - 1]).toEqual({ position: 48, major: true });
+    const majors = ticks.filter((tick) => tick.major).map((tick) => tick.position);
     expect(majors).toEqual([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 48]);
   });
 
   it('no encima la última etiqueta con la del extremo', () => {
-    const majors = rulerTicks(41, 10).filter((tick) => tick.major).map((tick) => tick.link);
+    const majors = rulerTicks(41, 10).filter((tick) => tick.major).map((tick) => tick.position);
     expect(majors).toEqual([0, 5, 10, 15, 20, 25, 30, 35, 41]);
+  });
+
+  it('en pulgadas: S900 de 36 links (11.88 in) a 10 px por link', () => {
+    const ticks = rulerTicks(11.88, 10 / 0.33, INCH_RULER_STEPS);
+    // 30 px por pulgada: números cada 2 in, marcas cada cuarto; el extremo lleva la medida real.
+    expect(ticks.filter((tick) => tick.major).map((tick) => tick.position)).toEqual([0, 2, 4, 6, 8, 10, 11.88]);
+    expect(ticks.filter((tick) => !tick.major).every((tick) => Number.isInteger(tick.position * 4))).toBe(true);
+    // Sin ruido de punto flotante: las marcas son cuartos exactos y no se repite el extremo.
+    expect(new Set(ticks.map((tick) => tick.position)).size).toBe(ticks.length);
+  });
+
+  it('en pulgadas no repite el extremo cuando cae en una marca', () => {
+    const ticks = rulerTicks(12, 30, INCH_RULER_STEPS);
+    expect(ticks.filter((tick) => tick.position === 12)).toEqual([{ position: 12, major: true }]);
   });
 
   it('ajusta la escala al ancho disponible dentro de los límites', () => {

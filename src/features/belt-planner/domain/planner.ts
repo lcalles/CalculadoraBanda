@@ -1,5 +1,18 @@
 import { BomLine, FlightConfig, PlanNotice, PlannedRow, PlannerInput, PlanResult, PlanStats, RowPattern } from '../types';
-import { formatCount, formatInches, formatLength, formatPlainNumber, LENGTH_UNIT_NAMES, ROUNDING_LABELS } from '../utils/format';
+import {
+  formatCount,
+  formatInches,
+  formatInchPosition,
+  formatLength,
+  formatModuleInches,
+  formatModuleSize,
+  formatModuleSizeExact,
+  formatModuleSizes,
+  formatPlainNumber,
+  joinWithAnd,
+  LENGTH_UNIT_NAMES,
+  ROUNDING_LABELS
+} from '../utils/format';
 import { buildBom, totalBomQuantity } from './bom';
 import { firstBlockedRow } from './cleanLayout';
 import { layoutRows } from './layout';
@@ -59,8 +72,10 @@ function describeRequestedSpacing(config: FlightConfig, value: 'step' | 'offset'
   return `${formatPlainNumber(value === 'step' ? config.stepInches : config.offsetInches)} in`;
 }
 
-const joinPositions = (seams: readonly number[]) =>
-  seams.length === 1 ? `${seams[0]}` : `${seams.slice(0, -1).join(', ')} y ${seams[seams.length - 1]}`;
+/** Posiciones de junta en pulgadas y, entre paréntesis, en links: "0.99 y 10.89 in (links 3 y 33)". */
+const positionsText = (seams: readonly number[], linkIncrementInches: number) =>
+  `${joinWithAnd(seams.map((seam) => formatInchPosition(seam, linkIncrementInches)))} in ` +
+  `(${seams.length === 1 ? 'link' : 'links'} ${joinWithAnd(seams.map(String))})`;
 
 /**
  * Explica por qué no hay armado sin juntas alineadas (combinación inválida): en qué fila se traba y,
@@ -68,6 +83,7 @@ const joinPositions = (seams: readonly number[]) =>
  */
 function describeSeamConflict(input: PlannerInput, plan: Omit<PlanResult, 'notices'>, blockedRow: number | null): string {
   const { patternsNormal, patternsPusher, pusherEdges } = plan;
+  const increment = input.linkIncrementInches;
   const blockedRowIsPusher = blockedRow !== null && plan.pusherRows.includes(blockedRow) && patternsPusher.length > 0;
   const where =
     blockedRow !== null
@@ -80,11 +96,12 @@ function describeSeamConflict(input: PlannerInput, plan: Omit<PlanResult, 'notic
   if (forcedPusher.length > 0) {
     const fixedEdges =
       pusherEdges?.fit === 'exact' && pusherEdges.minEdgeLinks
-        ? ` (orillas fijas de ${pusherEdges.minEdgeLinks}L por el indent deseado de ${formatPlainNumber(pusherEdges.indentInches!)} in)`
+        ? `, porque el indent deseado de ${formatPlainNumber(pusherEdges.indentInches!)} in fija sus orillas en ` +
+          formatModuleSize(pusherEdges.minEdgeLinks, increment)
         : '';
     const avoiding = patternsNormal.filter((pattern) => sharedSeams(pattern.seams, forcedPusher).length === 0).length;
     causes.push(
-      `Todas las filas de empujador tienen juntas en ${joinPositions(forcedPusher)} links${fixedEdges}; ` +
+      `Todas las filas de empujador tienen juntas en ${positionsText(forcedPusher, increment)}${fixedEdges}; ` +
         (avoiding === 0
           ? 'ningún armado normal las evita.'
           : `solo ${formatCount(avoiding, 'armado normal las evita', 'armados normales las evitan')}, de ${patternsNormal.length}.`)
@@ -92,7 +109,10 @@ function describeSeamConflict(input: PlannerInput, plan: Omit<PlanResult, 'notic
   }
   const forcedNormal = seamsSharedByAllPatterns(patternsNormal);
   if (forcedNormal.length > 0) {
-    causes.push(`Las juntas en ${joinPositions(forcedNormal)} links aparecen en todos los armados normales, así que dos filas normales seguidas siempre las alinean.`);
+    causes.push(
+      `Las juntas en ${positionsText(forcedNormal, increment)} aparecen en todos los armados normales, ` +
+        'así que dos filas normales seguidas siempre las alinean.'
+    );
   }
 
   return (
@@ -114,10 +134,12 @@ function collectNotices(
   const infos: string[] = [];
   const { widthLinks, rowsCount, pusherSpacing } = plan;
   const flight = input.flightConfig;
+  const increment = input.linkIncrementInches;
+  const widthText = `${formatInches(plan.realWidthInches)} (${widthLinks} links)`;
 
   if (plan.patternsNormal.length === 0) {
     warnings.push(
-      `Ningún armado con los módulos normales seleccionados suma ${widthLinks} links. ` +
+      `Ningún armado con los módulos normales seleccionados suma ${widthText}. ` +
         'Revisa que las orillas quepan en el ancho y agrega tamaños de módulo interno.'
     );
   }
@@ -128,30 +150,31 @@ function collectNotices(
   const indentText =
     edges?.indentInches && edges.minEdgeLinks
       ? (exactIndent
-          ? `el indent deseado de ${formatPlainNumber(edges.indentInches)} in pide orillas de exactamente ${edges.minEdgeLinks} links `
-          : `el indent de ${formatPlainNumber(edges.indentInches)} in pide al menos ${edges.minEdgeLinks} links `) +
-        `(${formatInches(edges.minEdgeLinks * input.linkIncrementInches)})`
+          ? `el indent deseado de ${formatPlainNumber(edges.indentInches)} in pide orillas de exactamente `
+          : `el indent de ${formatPlainNumber(edges.indentInches)} in pide orillas de al menos `) +
+        formatModuleSizeExact(edges.minEdgeLinks, increment)
       : '';
   const edgesBlockedByIndent = edges !== null && edges.usableSizes.length === 0 && edges.excludedSizes.length > 0;
+  const minEdgeText = edges?.minEdgeLinks ? formatModuleSize(edges.minEdgeLinks, increment) : '';
 
   if (edgesBlockedByIndent && plan.patternsNormal.length > 0) {
     warnings.push(
       exactIndent
         ? `Ninguna ${edgeKindLabel} elegida da el indent: ${indentText}. ` +
-            `Las filas de empujador se armaron con módulos normales; agrega la orilla de ${edges.minEdgeLinks}L.`
+            `Las filas de empujador se armaron con módulos normales; agrega la orilla de ${minEdgeText}.`
         : `Ninguna ${edgeKindLabel} elegida cubre el indent: ${indentText}. ` +
-            `Las filas de empujador se armaron con módulos normales; elige orillas de ${edges.minEdgeLinks}L o más.`
+            `Las filas de empujador se armaron con módulos normales; elige orillas de ${minEdgeText} o más.`
     );
   } else if (flight.enabled && plan.patternsNormal.length > 0 && plan.patternsPusher.length === 0) {
     warnings.push(
-      `Ningún armado con los módulos de empujador seleccionados suma ${widthLinks} links, ` +
+      `Ningún armado con los módulos de empujador seleccionados suma ${widthText}, ` +
         'así que las filas de empujador se armaron con módulos normales.'
     );
   }
 
   if (edges && edges.usableSizes.length > 0 && edges.excludedSizes.length > 0) {
     infos.push(
-      `En las filas de empujador no se usan las orillas de ${edges.excludedSizes.map((size) => `${size}L`).join(', ')}: ${indentText}.`
+      `En las filas de empujador no se usan las orillas de ${formatModuleSizes(edges.excludedSizes, increment)}: ${indentText}.`
     );
   }
 
@@ -170,7 +193,10 @@ function collectNotices(
     plan.bom.forEach((line) => {
       if (line.cutFromLinks === undefined) return;
       const key = `${line.kind}|${line.cutFromLinks}|${line.sizeLinks}`;
-      const entry = cuts.get(key) ?? { label: `de ${line.cutFromLinks}L a ${line.sizeLinks}L${line.kind === 'pusher' ? ' (empujador)' : ''}`, quantity: 0 };
+      const label =
+        `de ${formatModuleInches(line.cutFromLinks, increment)} a ${formatModuleInches(line.sizeLinks, increment)} ` +
+        `(${line.cutFromLinks}L a ${line.sizeLinks}L${line.kind === 'pusher' ? ', empujador' : ''})`;
+      const entry = cuts.get(key) ?? { label, quantity: 0 };
       entry.quantity += line.quantity;
       cuts.set(key, entry);
     });
@@ -183,7 +209,7 @@ function collectNotices(
 
   if (Math.abs(plan.realWidthInches - plan.requestedWidthInches) > MEASURE_TOLERANCE) {
     infos.push(
-      `El ancho quedó en ${widthLinks} links = ${formatInches(plan.realWidthInches)} ` +
+      `El ancho quedó en ${formatInches(plan.realWidthInches)} = ${widthLinks} links ` +
         `(se pidieron ${formatPlainNumber(plan.requestedWidthInches)} in, redondeo ${ROUNDING_LABELS[input.roundingMode]}).`
     );
   }

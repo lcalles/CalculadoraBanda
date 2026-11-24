@@ -92,7 +92,7 @@ describe('planBelt', () => {
     const result = planBelt(input({ edgesNormal: [2], innerNormal: [4], widthInches: 24.5 }));
     expect(result.rows).toEqual([]);
     expect(result.notices[0]).toMatchObject({ level: 'warning' });
-    expect(result.notices[0].message).toContain('49 links');
+    expect(result.notices[0].message).toContain('suma 24.500 in (49 links)');
   });
 
   it('informa cuando el ancho, el largo o el paso de empujadores se ajustan', () => {
@@ -104,7 +104,7 @@ describe('planBelt', () => {
       })
     );
     const infos = result.notices.filter((notice) => notice.level === 'info').map((notice) => notice.message);
-    expect(infos.some((message) => message.startsWith('El ancho quedó en 48 links'))).toBe(true);
+    expect(infos.some((message) => message.startsWith('El ancho quedó en 24.000 in = 48 links'))).toBe(true);
     expect(infos.some((message) => message.startsWith('El largo quedó en 60 filas'))).toBe(true);
     expect(infos.some((message) => message.includes('6.3 in se ajustó a 6 filas'))).toBe(true);
   });
@@ -124,7 +124,7 @@ describe('planBelt', () => {
     expect(warning).toContain('Combinación inválida: con estos tamaños no hay forma de armar las 60 filas sin juntas alineadas');
     expect(warning).toContain('no se puede llegar a la fila 2');
     // Con un único patrón posible, todas sus juntas son inevitables y el aviso lo dice.
-    expect(warning).toContain('Las juntas en 2, 10 y 18 links aparecen en todos los armados normales');
+    expect(warning).toContain('Las juntas en 1, 5 y 9 in (links 2, 10 y 18) aparecen en todos los armados normales');
   });
 
   it('explica cuando las orillas fijas del indent deseado dejan juntas que las filas normales no pueden evitar', () => {
@@ -147,7 +147,9 @@ describe('planBelt', () => {
     const warning = result.notices.find((notice) => notice.level === 'warning')!.message;
     expect(warning).toContain('Combinación inválida');
     expect(warning).toContain('(de empujador)');
-    expect(warning).toContain('Todas las filas de empujador tienen juntas en 3 y 27 links (orillas fijas de 3L por el indent deseado de 1 in)');
+    expect(warning).toContain(
+      'Todas las filas de empujador tienen juntas en 1 y 9 in (links 3 y 27), porque el indent deseado de 1 in fija sus orillas en 1 in (3L);'
+    );
     expect(warning).toContain('o cambia el paso de los empujadores');
   });
 

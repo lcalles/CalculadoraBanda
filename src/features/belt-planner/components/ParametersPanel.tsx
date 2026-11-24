@@ -93,7 +93,7 @@ export function ParametersPanel({ planner, catalogEntries, onShowInCatalog, onSa
 
   const widthHint =
     preview.widthLinks !== null && preview.realWidthInches !== null
-      ? `${preview.widthLinks} links, ${formatInches(preview.realWidthInches)} reales`
+      ? `${formatInches(preview.realWidthInches)} reales (${formatCount(preview.widthLinks, 'link', 'links')})`
       : 'Se convierte a links con el incremento.';
   const lengthHint =
     preview.rowsCount !== null && preview.realLengthInches !== null

@@ -89,7 +89,7 @@ describe('validatePlannerForm con banda del catálogo', () => {
 
   it('rechaza un ancho menor al mínimo de la banda', () => {
     const { errors } = validatePlannerForm(form({ widthInches: '1.3' }), s800);
-    expect(errors.widthInches).toBe('La S800 Flat Top tiene un ancho mínimo de 2 in (3 links); este ancho queda en 2 links.');
+    expect(errors.widthInches).toBe('La S800 Flat Top tiene un ancho mínimo de 2 in (3 links); este ancho queda en 1.320 in (2 links).');
   });
 
   it('rechaza un ancho mayor al máximo de la banda', () => {
@@ -213,10 +213,11 @@ describe('validatePlannerForm: orillas e indent de empujador', () => {
   it('marca error si ninguna orilla cubre el indent', () => {
     // 2 in con incremento 0.66 pide 3 links; las orillas de empujador son 2L.
     const pusherEdges = validatePlannerForm(form({ edgesPusher: [2], pusherIndentInches: '2' }), s800);
-    expect(pusherEdges.errors.edgesPusher).toBe('Ninguna orilla de empujador cubre el indent de 2 in: se necesitan orillas de 3L o más.');
+    // 3L × 0.66 in = 1.98 in, que se nombra "2 in".
+    expect(pusherEdges.errors.edgesPusher).toBe('Ninguna orilla de empujador cubre el indent de 2 in: se necesitan orillas de 2 in (3L) o más.');
     const normalEdges = validatePlannerForm(form({ pusherEdgeMode: 'normal', edgesNormal: [2], flightId: 'flight-prueba' }), s800);
     expect(normalEdges.errors.edgesNormal).toBe(
-      'Flight de prueba pide un indent mínimo de 2 in: para las filas de empujador se necesita una orilla normal de 3L o más.'
+      'Flight de prueba pide un indent mínimo de 2 in: para las filas de empujador se necesita una orilla normal de 2 in (3L) o más.'
     );
     expect(normalEdges.errors.pusherIndentInches).toBeUndefined();
   });
@@ -240,7 +241,7 @@ describe('validatePlannerForm: orillas e indent de empujador', () => {
 
   it('con indent deseado exige la orilla normal exacta, aunque haya otras más grandes', () => {
     const expected =
-      'Con un indent deseado de 2 in, las filas de empujador llevan orillas normales de 3L (1.980 in): elige ese tamaño en orillas normales.';
+      'Con un indent deseado de 2 in, las filas de empujador llevan orillas normales de 2 in (3L = 1.980 in): elige ese tamaño en orillas normales.';
     const typedNormal = (edgesNormal: number[]) =>
       validatePlannerForm(form({ pusherEdgeMode: 'normal', edgesNormal, flightId: 'streamline-flights', normalEdgeIndentInches: '2' }), s800)
         .errors.edgesNormal;

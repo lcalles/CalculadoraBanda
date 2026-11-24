@@ -28,7 +28,14 @@ export function ExportActions({ input, result, belt, title, diagramRef }: Export
         type="button"
         className="btn btn-secondary"
         disabled={!hasRows}
-        onClick={() => downloadTextFile(`${prefix}-bom.csv`, toBomCsv(result.bom, input.flightConfig.flightLabel ?? null), 'text/csv', true)}
+        onClick={() =>
+          downloadTextFile(
+            `${prefix}-bom.csv`,
+            toBomCsv(result.bom, input.linkIncrementInches, input.flightConfig.flightLabel ?? null),
+            'text/csv',
+            true
+          )
+        }
       >
         <FileSpreadsheet aria-hidden="true" size={16} />
         BOM (CSV)
@@ -37,7 +44,7 @@ export function ExportActions({ input, result, belt, title, diagramRef }: Export
         type="button"
         className="btn btn-secondary"
         disabled={!hasRows}
-        onClick={() => downloadTextFile(`${prefix}-juntas.csv`, toSeamsCsv(result.rows), 'text/csv', true)}
+        onClick={() => downloadTextFile(`${prefix}-juntas.csv`, toSeamsCsv(result.rows, input.linkIncrementInches), 'text/csv', true)}
       >
         <FileSpreadsheet aria-hidden="true" size={16} />
         Juntas (CSV)

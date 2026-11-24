@@ -2,7 +2,7 @@ import { MAX_ROWS, MAX_WIDTH_LINKS } from '../domain/constants';
 import { moduleSupply } from '../domain/cuts';
 import { calculateRows, inchesToLength, lengthToInches, minimumLinksFor, referenceWidthInLinks, roundLinks } from '../domain/units';
 import { IndentFit, LengthUnit, PlannerInput, PusherEdgeMode, PusherMode, RoundingMode } from '../types';
-import { formatInches, formatPlainNumber, LENGTH_UNIT_NAMES } from '../utils/format';
+import { formatInches, formatModuleSize, formatModuleSizeExact, formatPlainNumber, LENGTH_UNIT_NAMES } from '../utils/format';
 
 /**
  * Datos de serie que impone una banda del catálogo. Cuando hay una banda elegida,
@@ -203,12 +203,16 @@ export function validatePlannerForm(form: PlannerFormState, series: SeriesSpec |
     const links = roundLinks(widthInches, linkIncrementInches, form.roundingMode);
     const minLinks = series?.minWidthInches ? referenceWidthInLinks(series.minWidthInches, linkIncrementInches) : null;
     const maxLinks = series?.maxWidthInches ? referenceWidthInLinks(series.maxWidthInches, linkIncrementInches) : null;
+    const resulting = `${formatInches(links * linkIncrementInches)} (${links} links)`;
     if (links < 1) errors.widthInches = 'Con este incremento y redondeo el ancho queda en 0 links. Aumenta el ancho o usa redondeo hacia arriba.';
-    else if (links > MAX_WIDTH_LINKS) errors.widthInches = `El ancho equivale a ${links} links; el máximo que se calcula es ${MAX_WIDTH_LINKS}.`;
-    else if (series && minLinks !== null && links < minLinks) {
-      errors.widthInches = `La ${series.label} tiene un ancho mínimo de ${formatPlainNumber(series.minWidthInches!)} in (${minLinks} links); este ancho queda en ${links} links.`;
+    else if (links > MAX_WIDTH_LINKS) {
+      errors.widthInches =
+        `El ancho equivale a ${resulting}; con este incremento el máximo que se calcula es ` +
+        `${formatInches(MAX_WIDTH_LINKS * linkIncrementInches)} (${MAX_WIDTH_LINKS} links).`;
+    } else if (series && minLinks !== null && links < minLinks) {
+      errors.widthInches = `La ${series.label} tiene un ancho mínimo de ${formatPlainNumber(series.minWidthInches!)} in (${minLinks} links); este ancho queda en ${resulting}.`;
     } else if (series && maxLinks !== null && links > maxLinks) {
-      errors.widthInches = `La ${series.label} tiene un ancho máximo de ${formatPlainNumber(series.maxWidthInches!)} in (${maxLinks} links); este ancho queda en ${links} links.`;
+      errors.widthInches = `La ${series.label} tiene un ancho máximo de ${formatPlainNumber(series.maxWidthInches!)} in (${maxLinks} links); este ancho queda en ${resulting}.`;
     }
   }
   if (!errors.lengthValue && !errors.pitchInches) {
@@ -256,16 +260,17 @@ export function validatePlannerForm(form: PlannerFormState, series: SeriesSpec |
       const available = moduleSupply(candidates, form.allowCutModules).sizes;
       if (candidates.length > 0 && edgeIndentFit === 'exact' && !available.includes(minLinks)) {
         errors.edgesNormal =
-          `Con un indent deseado de ${indent} in, las filas de empujador llevan orillas normales de ${minLinks}L ` +
-          `(${formatInches(minLinks * linkIncrementInches)}): elige ese tamaño en orillas normales` +
+          `Con un indent deseado de ${indent} in, las filas de empujador llevan orillas normales de ` +
+          `${formatModuleSizeExact(minLinks, linkIncrementInches)}: elige ese tamaño en orillas normales` +
           `${form.allowCutModules ? ' o uno mayor para cortarlo' : ''}.`;
       } else if (candidates.length > 0 && !candidates.some((size) => size >= minLinks)) {
+        const minEdge = formatModuleSize(minLinks, linkIncrementInches);
         if (usesPusherEdges) {
-          errors.edgesPusher = `Ninguna orilla de empujador cubre el indent de ${indent} in: se necesitan orillas de ${minLinks}L o más.`;
+          errors.edgesPusher = `Ninguna orilla de empujador cubre el indent de ${indent} in: se necesitan orillas de ${minEdge} o más.`;
         } else {
           errors.edgesNormal =
             `${flight!.name} pide un indent mínimo de ${indent} in: para las filas de empujador ` +
-            `se necesita una orilla normal de ${minLinks}L o más.`;
+            `se necesita una orilla normal de ${minEdge} o más.`;
         }
       }
     }

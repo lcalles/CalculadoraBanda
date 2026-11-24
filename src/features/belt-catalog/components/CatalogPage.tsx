@@ -2,7 +2,7 @@ import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Download, Pencil, Plus, RotateCcw, Trash2, Upload } from 'lucide-react';
 import { downloadTextFile } from '../../belt-planner/exporters';
 import { INTRALOX_2022_CATALOG } from '../data/intralox2022';
-import { formatPlainNumber } from '../../belt-planner/utils/format';
+import { formatModuleSizes, formatPlainNumber } from '../../belt-planner/utils/format';
 import { entryLabel, FAMILY_LABELS, filterEntries, parseCatalogDocument, serializeCatalog, widthInLinks } from '../domain/catalog';
 import { draftFromEntry, duplicateDraft, EntryDraft, emptyDraft } from '../domain/entryDraft';
 import { BeltCatalogState } from '../hooks/useBeltCatalog';
@@ -244,7 +244,12 @@ export function CatalogPage({ catalog, selectedEntryId, calculatorModules, inten
                       <td className="whitespace-nowrap px-3 py-1.5 text-right">{widthCell(entry.maxWidthInches, entry.linkIncrementInches)}</td>
                       <td className="px-3 py-1.5 text-[13px]">
                         {entry.modules ? (
-                          <span title={`Orillas ${entry.modules.edgesNormal.join(', ')}L; internos ${entry.modules.innerNormal.join(', ')}L`}>
+                          <span
+                            title={
+                              `Orillas ${formatModuleSizes(entry.modules.edgesNormal, entry.linkIncrementInches)}; ` +
+                              `internos ${formatModuleSizes(entry.modules.innerNormal, entry.linkIncrementInches)}`
+                            }
+                          >
                             Predefinidos
                           </span>
                         ) : (

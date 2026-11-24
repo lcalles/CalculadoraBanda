@@ -81,33 +81,43 @@ export function segmentSpans(segments: readonly Segment[], pxPerLink: number, or
 }
 
 export interface RulerTick {
-  link: number;
+  /** Posición desde la orilla izquierda, en la unidad de la regla. */
+  position: number;
   major: boolean;
 }
 
-const NICE_STEPS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+/** Pasos de la regla en links. */
+export const LINK_RULER_STEPS: readonly number[] = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
+/** Pasos de la regla en pulgadas: el menor es el cuarto con que se nombran los módulos. */
+export const INCH_RULER_STEPS: readonly number[] = [0.25, 0.5, 1, 2, 5, 10, 20, 50, 100, 200, 500, 1000];
 
-function niceStep(pxPerLink: number, minimumPx: number): number {
-  return NICE_STEPS.find((step) => step * pxPerLink >= minimumPx) ?? NICE_STEPS[NICE_STEPS.length - 1];
+function niceStep(steps: readonly number[], pxPerUnit: number, minimumPx: number): number {
+  return steps.find((step) => step * pxPerUnit >= minimumPx) ?? steps[steps.length - 1];
 }
 
+const isMultipleOf = (value: number, step: number) => Math.abs(value / step - Math.round(value / step)) < 1e-9;
+
 /**
- * Marcas de la regla en links: las mayores (con número) quedan al menos a 40 px entre sí
- * y las menores a 6 px. El extremo derecho siempre se marca.
+ * Marcas de la regla: las mayores (con número) quedan al menos a 40 px entre sí
+ * y las menores a 6 px. El cero y el extremo derecho siempre se numeran.
+ * Sirve para cualquier unidad; el diagrama la usa en pulgadas (`INCH_RULER_STEPS`).
  */
-export function rulerTicks(widthLinks: number, pxPerLink: number): RulerTick[] {
-  const majorStep = niceStep(pxPerLink, 40);
-  const minorStep = Math.min(niceStep(pxPerLink, 6), majorStep);
+export function rulerTicks(width: number, pxPerUnit: number, steps: readonly number[] = LINK_RULER_STEPS): RulerTick[] {
+  const majorStep = niceStep(steps, pxPerUnit, 40);
+  const minorStep = Math.min(niceStep(steps, pxPerUnit, 6), majorStep);
   const ticks: RulerTick[] = [];
-  for (let link = 0; link <= widthLinks; link += minorStep) {
-    ticks.push({ link, major: link % majorStep === 0 });
+  // Por índice y no sumando, para que el ruido de punto flotante no se acumule.
+  for (let index = 0; index * minorStep <= width + 1e-9; index += 1) {
+    const position = index * minorStep;
+    ticks.push({ position, major: isMultipleOf(position, majorStep) });
   }
-  if (ticks[ticks.length - 1]?.link !== widthLinks) ticks.push({ link: widthLinks, major: true });
+  const last = ticks[ticks.length - 1];
+  if (!last || Math.abs(last.position - width) > 1e-9) ticks.push({ position: width, major: true });
   // El extremo derecho siempre lleva número; se quita el de la marca mayor anterior si se enciman.
   const end = ticks[ticks.length - 1];
   end.major = true;
   const previousMajor = [...ticks].reverse().find((tick) => tick.major && tick !== end);
-  if (previousMajor && (end.link - previousMajor.link) * pxPerLink < 28) previousMajor.major = false;
+  if (previousMajor && (end.position - previousMajor.position) * pxPerUnit < 28) previousMajor.major = false;
   return ticks;
 }
 

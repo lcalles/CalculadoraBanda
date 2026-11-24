@@ -1,7 +1,7 @@
 import { forwardRef, memo } from 'react';
 import { PlannedRow } from '../types';
-import { DIAGRAM_METRICS, diagramSize, rowTop, rulerTicks, segmentSpans } from '../utils/diagramGeometry';
-import { formatInches, KIND_LABELS, ROLE_LABELS } from '../utils/format';
+import { DIAGRAM_METRICS, diagramSize, INCH_RULER_STEPS, rowTop, rulerTicks, segmentSpans } from '../utils/diagramGeometry';
+import { formatInches, formatInchPosition, formatModuleNumber, formatModuleSize, formatPlainNumber, KIND_LABELS, ROLE_LABELS } from '../utils/format';
 import { colorOfSegment, ModuleColor } from '../utils/moduleColors';
 import { DIAGRAM_COLORS, DIAGRAM_FONT, segmentFill, segmentLabelColor } from './diagramTheme';
 
@@ -19,7 +19,9 @@ interface BeltDiagramProps {
 }
 
 const { gutter, rowHeight } = DIAGRAM_METRICS;
-const MIN_LABEL_WIDTH = 16;
+/** Ancho aproximado de un carácter de 11 px en negritas, para saber si el nombre cabe en el módulo. */
+const LABEL_CHAR_WIDTH = 6.5;
+const LABEL_PADDING = 4;
 
 /** Cota de ancho estilo plano: línea con remates oblicuos y el valor al centro. */
 function WidthDimension({ x0, x1, label }: { x0: number; x1: number; label: string }) {
@@ -41,19 +43,22 @@ function WidthDimension({ x0, x1, label }: { x0: number; x1: number; label: stri
   );
 }
 
-function Ruler({ widthLinks, pxPerLink }: { widthLinks: number; pxPerLink: number }) {
+/** Regla en pulgadas desde la orilla izquierda. */
+function Ruler({ widthLinks, pxPerLink, linkIncrementInches }: { widthLinks: number; pxPerLink: number; linkIncrementInches: number }) {
   const baseline = DIAGRAM_METRICS.top - 8;
+  const widthInches = Number((widthLinks * linkIncrementInches).toFixed(6));
+  const pxPerInch = pxPerLink / linkIncrementInches;
   return (
     <g>
       <line x1={gutter} y1={baseline} x2={gutter + widthLinks * pxPerLink} y2={baseline} stroke={DIAGRAM_COLORS.inkMuted} strokeWidth={1} />
-      {rulerTicks(widthLinks, pxPerLink).map((tick) => {
-        const x = gutter + tick.link * pxPerLink;
+      {rulerTicks(widthInches, pxPerInch, INCH_RULER_STEPS).map((tick) => {
+        const x = gutter + tick.position * pxPerInch;
         return (
-          <g key={tick.link}>
+          <g key={tick.position}>
             <line x1={x} y1={baseline} x2={x} y2={baseline - (tick.major ? 6 : 3)} stroke={DIAGRAM_COLORS.inkMuted} strokeWidth={1} />
             {tick.major && (
               <text x={x} y={baseline - 9} textAnchor="middle" fontSize={10} fill={DIAGRAM_COLORS.inkMuted}>
-                {tick.link}
+                {formatPlainNumber(tick.position, 2)}
               </text>
             )}
           </g>
@@ -93,17 +98,19 @@ const DiagramRow = memo(function DiagramRow({ row, index, pxPerLink, linkIncreme
       </text>
       {segmentSpans(row.segments, pxPerLink).map((span) => {
         const color = colorOfSegment(moduleColors, span.segment, bidirectional);
+        const name = formatModuleNumber(span.segment.size, linkIncrementInches);
         return (
         <g key={span.startLink}>
           <rect x={span.x} y={y} width={span.width} height={rowHeight} fill={color?.fill ?? segmentFill(span.segment)} stroke={DIAGRAM_COLORS.ink} strokeWidth={1}>
             <title>
               {`Fila ${row.rowNumber}, ${ROLE_LABELS[span.segment.role].toLowerCase()} ${KIND_LABELS[span.segment.kind].toLowerCase()} ` +
-                `de ${span.segment.size}L (${formatInches(span.segment.size * linkIncrementInches)})` +
-                (span.segment.cutFrom !== undefined ? `, cortado de ${span.segment.cutFrom}L` : '') +
-                `, links ${span.startLink} a ${span.endLink}`}
+                `de ${formatModuleSize(span.segment.size, linkIncrementInches)}, ${formatInches(span.segment.size * linkIncrementInches)} reales` +
+                (span.segment.cutFrom !== undefined ? `, cortado de ${formatModuleSize(span.segment.cutFrom, linkIncrementInches)}` : '') +
+                `, de ${formatInchPosition(span.startLink, linkIncrementInches)} a ${formatInchPosition(span.endLink, linkIncrementInches)} in` +
+                ` (links ${span.startLink} a ${span.endLink})`}
             </title>
           </rect>
-          {span.width >= MIN_LABEL_WIDTH && (
+          {span.width >= name.length * LABEL_CHAR_WIDTH + LABEL_PADDING && (
             <text
               x={span.x + span.width / 2}
               y={centerY + 4}
@@ -113,7 +120,7 @@ const DiagramRow = memo(function DiagramRow({ row, index, pxPerLink, linkIncreme
               fill={color?.label ?? segmentLabelColor(span.segment)}
               pointerEvents="none"
             >
-              {span.segment.size}
+              {name}
             </text>
           )}
         </g>
@@ -133,7 +140,7 @@ const DiagramRow = memo(function DiagramRow({ row, index, pxPerLink, linkIncreme
               strokeWidth={3}
               strokeLinecap="round"
             >
-              <title>{`Junta alineada en el link ${seam} entre las filas ${row.rowNumber - 1} y ${row.rowNumber}`}</title>
+              <title>{`Junta alineada a ${formatInchPosition(seam, linkIncrementInches)} in (link ${seam}) entre las filas ${row.rowNumber - 1} y ${row.rowNumber}`}</title>
             </line>
           );
         })}
@@ -141,7 +148,10 @@ const DiagramRow = memo(function DiagramRow({ row, index, pxPerLink, linkIncreme
   );
 });
 
-/** Dibujo técnico del armado: cota de ancho, regla en links y una franja por fila. */
+/**
+ * Dibujo técnico del armado: cota de ancho, regla en pulgadas y una franja por fila.
+ * Cada módulo lleva su nombre en pulgadas; los links están en la cota y en el texto de cada módulo.
+ */
 export const BeltDiagram = forwardRef<SVGSVGElement, BeltDiagramProps>(function BeltDiagram(
   { rows, totalRows, widthLinks, linkIncrementInches, pxPerLink, moduleColors, bidirectional, title },
   ref
@@ -149,7 +159,7 @@ export const BeltDiagram = forwardRef<SVGSVGElement, BeltDiagramProps>(function 
   const { width, height } = diagramSize(widthLinks, rows.length, pxPerLink);
   const aligned = rows.reduce((sum, row) => sum + row.alignedSeams.length, 0);
   const description =
-    `${totalRows} filas de ${widthLinks} links (${formatInches(widthLinks * linkIncrementInches)}).` +
+    `${totalRows} filas de ${formatInches(widthLinks * linkIncrementInches)} (${widthLinks} links). Módulos nombrados en pulgadas.` +
     (rows.length < totalRows ? ` Se muestran las primeras ${rows.length}.` : '') +
     ` ${aligned === 0 ? 'Sin juntas alineadas entre filas adyacentes.' : `${aligned} juntas alineadas marcadas en rojo.`}`;
 
@@ -171,9 +181,9 @@ export const BeltDiagram = forwardRef<SVGSVGElement, BeltDiagramProps>(function 
       <WidthDimension
         x0={gutter}
         x1={gutter + widthLinks * pxPerLink}
-        label={`${widthLinks} links = ${formatInches(widthLinks * linkIncrementInches)}`}
+        label={`${formatInches(widthLinks * linkIncrementInches)} = ${widthLinks} links`}
       />
-      <Ruler widthLinks={widthLinks} pxPerLink={pxPerLink} />
+      <Ruler widthLinks={widthLinks} pxPerLink={pxPerLink} linkIncrementInches={linkIncrementInches} />
       {rows.map((row, index) => (
         <DiagramRow
           key={row.rowNumber}

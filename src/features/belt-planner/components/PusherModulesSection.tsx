@@ -5,7 +5,7 @@ import { moduleSupply } from '../domain/cuts';
 import { minimumLinksFor } from '../domain/units';
 import { catalogMinimumIndent, FormErrors, parseDecimal, PlannerFormState, resolveNormalEdgeIndent } from '../form/plannerForm';
 import { PusherEdgeMode } from '../types';
-import { formatInches, formatPlainNumber } from '../utils/format';
+import { formatModuleSize, formatModuleSizeExact, formatPlainNumber } from '../utils/format';
 import { SizeSelector } from './SizeSelector';
 
 interface PusherModulesSectionProps {
@@ -65,7 +65,7 @@ export function PusherModulesSection({
   const indent = usesPusherEdges ? (typedIndent > 0 ? typedIndent : null) : normalIndent.inches;
   const minEdgeLinks = indent !== null && linkIncrementInches ? minimumLinksFor(indent, linkIncrementInches) : null;
   const options = selectedFlight && usesPusherEdges ? indentOptions(selectedFlight, 'pusher') : [];
-  const edgesFromIndent = minEdgeLinks !== null && linkIncrementInches ? `${minEdgeLinks}L o más (${formatInches(minEdgeLinks * linkIncrementInches)})` : null;
+  const edgesFromIndent = minEdgeLinks !== null && linkIncrementInches ? `${formatModuleSizeExact(minEdgeLinks, linkIncrementInches)} o más` : null;
 
   const indentHint = (() => {
     if (edgesFromIndent) return `Las orillas de empujador serán de ${edgesFromIndent}.`;
@@ -83,7 +83,8 @@ export function PusherModulesSection({
       const cutSource = minEdgeLinks !== null ? edgeSupply.cutFrom.get(minEdgeLinks) : undefined;
       const exactEdge =
         minEdgeLinks !== null && linkIncrementInches
-          ? `${minEdgeLinks}L (${formatInches(minEdgeLinks * linkIncrementInches)})${cutSource !== undefined ? `, cortadas de ${cutSource}L` : ''}`
+          ? `${formatModuleSizeExact(minEdgeLinks, linkIncrementInches)}` +
+            (cutSource !== undefined ? `, cortadas de ${formatModuleSize(cutSource, linkIncrementInches)}` : '')
           : null;
       const edgeMissing = minEdgeLinks !== null && !edgeSupply.sizes.includes(minEdgeLinks);
       return (
@@ -93,7 +94,8 @@ export function PusherModulesSection({
             : 'En las filas de empujador, ambas orillas normales serán del tamaño que da este indent.'}
           {edgeMissing && (
             <span className="block text-alert">
-              Elige la orilla normal de {minEdgeLinks}L{form.allowCutModules ? ' o una mayor para cortarla' : ''}: con las orillas elegidas
+              Elige la orilla normal de {formatModuleSize(minEdgeLinks!, linkIncrementInches)}
+              {form.allowCutModules ? ' o una mayor para cortarla' : ''}: con las orillas elegidas
               no se puede dar este indent.
             </span>
           )}

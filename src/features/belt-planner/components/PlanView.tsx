@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { CalculatedPlan } from '../hooks/useBeltPlanner';
-import { formatCount } from '../utils/format';
+import { formatCount, formatInches } from '../utils/format';
 import { assignModuleColors } from '../utils/moduleColors';
 import { BomTable } from './BomTable';
 import { DrawingSheet } from './DrawingSheet';
@@ -47,8 +47,9 @@ export function PlanView({ plan, isStale, title }: PlanViewProps) {
           </h2>
           <p className="tabular text-sm text-ink-muted">
             {title ? `${sheetName}. ` : ''}
-            {belt ? `Banda${belt.manufacturer ? ` ${belt.manufacturer}` : ''}` : 'Banda personalizada'} de {result.widthLinks} links por{' '}
-            {formatCount(result.rowsCount, 'fila', 'filas')}. Calculada el{' '}
+            {belt ? `Banda${belt.manufacturer ? ` ${belt.manufacturer}` : ''}` : 'Banda personalizada'} de{' '}
+            {formatInches(result.realWidthInches)} ({result.widthLinks} links) por {formatCount(result.rowsCount, 'fila', 'filas')}. Calculada
+            el{' '}
             {calculatedAt.toLocaleString('es-MX', { dateStyle: 'medium', timeStyle: 'short' })}
           </p>
         </div>
@@ -78,8 +79,13 @@ export function PlanView({ plan, isStale, title }: PlanViewProps) {
         title={title}
       />
       <div className="grid items-start gap-4 2xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <BomTable bom={result.bom} pusherLabel={input.flightConfig.flightLabel ?? null} moduleColors={moduleColors} />
-        <SeamsTable key={planKey} rows={result.rows} />
+        <BomTable
+          bom={result.bom}
+          linkIncrementInches={input.linkIncrementInches}
+          pusherLabel={input.flightConfig.flightLabel ?? null}
+          moduleColors={moduleColors}
+        />
+        <SeamsTable key={planKey} rows={result.rows} linkIncrementInches={input.linkIncrementInches} />
       </div>
     </article>
   );

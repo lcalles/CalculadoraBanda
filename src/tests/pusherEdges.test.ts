@@ -95,7 +95,8 @@ describe('planBelt con orillas de empujador', () => {
       });
     expect(result.notices).toContainEqual({
       level: 'info',
-      message: 'En las filas de empujador no se usan las orillas de 2L: el indent de 2 in pide al menos 3 links (1.980 in).'
+      // 0.66 in por link: 2L = 1.32 in, que se nombra 1.25 in; 3L = 1.98 in, que se nombra 2 in.
+      message: 'En las filas de empujador no se usan las orillas de 1.25 in (2L): el indent de 2 in pide orillas de al menos 2 in (3L = 1.980 in).'
     });
   });
 
@@ -106,7 +107,7 @@ describe('planBelt con orillas de empujador', () => {
     const warnings = result.notices.filter((notice) => notice.level === 'warning').map((notice) => notice.message);
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('Ninguna orilla de empujador elegida cubre el indent');
-    expect(warnings[0]).toContain('elige orillas de 3L o más');
+    expect(warnings[0]).toContain('elige orillas de 2 in (3L) o más');
   });
 });
 
@@ -143,7 +144,9 @@ describe('planBelt con indent deseado exacto (orillas normales)', () => {
     expect(result.stats.alignedSeamCount).toBe(0);
     expect(result.notices).toContainEqual({
       level: 'info',
-      message: 'En las filas de empujador no se usan las orillas de 6L, 9L: el indent deseado de 1 in pide orillas de exactamente 3 links (0.990 in).'
+      message:
+        'En las filas de empujador no se usan las orillas de 2 in (6L), 3 in (9L): ' +
+        'el indent deseado de 1 in pide orillas de exactamente 1 in (3L = 0.990 in).'
     });
   });
 
@@ -152,7 +155,7 @@ describe('planBelt con indent deseado exacto (orillas normales)', () => {
     expect(result.patternsPusher).toEqual([]);
     const warnings = result.notices.filter((notice) => notice.level === 'warning').map((notice) => notice.message);
     expect(warnings).toContainEqual(expect.stringContaining('Ninguna orilla normal elegida da el indent'));
-    expect(warnings).toContainEqual(expect.stringContaining('agrega la orilla de 3L'));
+    expect(warnings).toContainEqual(expect.stringContaining('agrega la orilla de 1 in (3L)'));
   });
 
   it('el ajuste mínimo (comportamiento anterior) sigue permitiendo orillas más grandes', () => {
